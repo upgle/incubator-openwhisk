@@ -741,8 +741,8 @@ abstract class ApiGwTests extends BaseApiGwTests {
   it should "verify successful creation with complex swagger doc as input" in {
     val testName = "CLI_APIGWTEST13"
     val testbasepath = "/test1/v1"
-    val testrelpath = "/whisk_system/utils/echo"
-    val testrelpath2 = "/whisk_system/utils/split"
+    val testrelpath = "/lambda/utils/echo"
+    val testrelpath2 = "/lambda/utils/split"
     val testurlop = "get"
     val testurlop2 = "post"
     val testapiname = testName + " API Name"

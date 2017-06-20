@@ -177,7 +177,7 @@ object InvokerPool {
 
   /** A stub identity for invoking the test action. This does not need to be a valid identity. */
   val healthActionIdentity = {
-    val whiskSystem = "whisk.system"
+    val whiskSystem = "lambda"
     Identity(Subject(whiskSystem), EntityName(whiskSystem), AuthKey(UUID(), Secret()), Set[Privilege]())
   }
 
