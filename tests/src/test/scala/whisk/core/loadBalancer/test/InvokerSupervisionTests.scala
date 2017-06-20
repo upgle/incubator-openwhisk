@@ -191,7 +191,7 @@ class InvokerSupervisionTests
     // Send ActivationMessage to InvokerPool
     val activationMessage = ActivationMessage(
       transid = TransactionId.invokerHealth,
-      action = FullyQualifiedEntityName(EntityPath("whisk.system/utils"), EntityName("date")),
+      action = FullyQualifiedEntityName(EntityPath("lambda/utils"), EntityName("date")),
       revision = DocRevision.empty,
       user = Identity(
         Subject("unhealthyInvokerCheck"),

@@ -149,7 +149,7 @@ Vagrant.configure('2') do |config|
     # This allows user to see how to configure the wsk cli outside the VM
     wsk property set --apihost ${WHISK_IP} --auth `cat ${ANSIBLE_HOME}/files/auth.guest`
     echo "Swagger UI URL: https://${WHISK_IP}/api/v1/docs/index.html?url=/api/v1/api-docs"
-    wsk action invoke /whisk.system/utils/echo -p message hello --result
+    wsk action invoke /lambda/utils/echo -p message hello --result
     echo "`date`: build-deploy-end" >> /tmp/vagrant-times.txt
   SCRIPT
 
