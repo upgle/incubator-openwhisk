@@ -159,7 +159,7 @@ $script_end = <<SCRIPT
   chown -R vagrant:vagrant $HOME
   # This allows user to see how to configure the wsk cli outside the VM
   wsk property set --apihost ${WHISK_IP} --namespace guest --auth `cat ${ANSIBLE_HOME}/files/auth.guest`
-  wsk action invoke /whisk.system/utils/echo -p message hello --result
+  wsk action invoke /lambda/utils/echo -p message hello --result
   echo "`date`: build-deploy-end" >> /tmp/vagrant-times.txt
 SCRIPT
 

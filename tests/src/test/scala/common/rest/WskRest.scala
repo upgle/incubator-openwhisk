@@ -1184,7 +1184,7 @@ class RunWskRestCmd() extends FlatSpec with RunWskCmd with Matchers with ScalaFu
   val queueSize = 10
   val maxOpenRequest = 1024
   val basePath = Path("/api/v1")
-  val systemNamespace = "whisk.system"
+  val systemNamespace = "lambda"
 
   val sslConfig = AkkaSSLConfig().mapSettings { s =>
     s.withHostnameVerifierClass(classOf[AcceptAllHostNameVerifier].asInstanceOf[Class[HostnameVerifier]])

@@ -16,9 +16,9 @@
                 },
                 "x-openwhisk": {
                     "action": "CLI_APIGWTEST7_action",
-                    "namespace": "whisk.system",
+                    "namespace": "lambda",
                     "package": "",
-                    "url": "https://172.17.0.1/api/v1/web/whisk.system/default/CLI_APIGWTEST7_action.http"
+                    "url": "https://172.17.0.1/api/v1/web/lambda/default/CLI_APIGWTEST7_action.http"
                 }
             }
         }
@@ -43,7 +43,7 @@
                                 "execute": [
                                     {
                                         "invoke": {
-                                            "target-url": "https://172.17.0.1/api/v1/web/whisk.system/default/CLI_APIGWTEST7_action.http",
+                                            "target-url": "https://172.17.0.1/api/v1/web/lambda/default/CLI_APIGWTEST7_action.http",
                                             "verb": "keep"
                                         }
                                     }

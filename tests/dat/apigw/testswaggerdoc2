@@ -6,9 +6,9 @@
         "version": "1.0.0"
     },
     "paths": {
-        "/whisk_system/utils/echo": {
+        "/lambda/utils/echo": {
             "get": {
-                "operationId": "get_/whisk_system/utils/echo",
+                "operationId": "get_/lambda/utils/echo",
                 "responses": {
                     "default": {
                         "description": "Default response"
@@ -16,13 +16,13 @@
                 },
                 "x-openwhisk": {
                     "action": "test1a",
-                    "namespace": "whisk.system",
+                    "namespace": "lambda",
                     "package": "",
-                    "url": "https://172.17.0.1/api/v1/web/whisk.system/default/test1a.http"
+                    "url": "https://172.17.0.1/api/v1/web/lambda/default/test1a.http"
                 }
             },
             "post": {
-                "operationId": "post_/whisk_system/utils/echo",
+                "operationId": "post_/lambda/utils/echo",
                 "responses": {
                     "default": {
                         "description": "Default response"
@@ -30,15 +30,15 @@
                 },
                 "x-openwhisk": {
                     "action": "test1a",
-                    "namespace": "whisk.system",
+                    "namespace": "lambda",
                     "package": "",
-                    "url": "https://172.17.0.1/api/v1/web/whisk.system/default/test1a.http"
+                    "url": "https://172.17.0.1/api/v1/web/lambda/default/test1a.http"
                 }
             }
         },
-        "/whisk_system/utils/split": {
+        "/lambda/utils/split": {
             "post": {
-                "operationId": "post_/whisk_system/utils/split",
+                "operationId": "post_/lambda/utils/split",
                 "responses": {
                     "default": {
                         "description": "Default response"
@@ -46,9 +46,9 @@
                 },
                 "x-openwhisk": {
                     "action": "test1a",
-                    "namespace": "whisk.system",
+                    "namespace": "lambda",
                     "package": "",
-                    "url": "https://172.17.0.1/api/v1/web/whisk.system/default/test1a.http"
+                    "url": "https://172.17.0.1/api/v1/web/lambda/default/test1a.http"
                 }
             }
         }
@@ -71,12 +71,12 @@
                         "case": [
                             {
                                 "operations": [
-                                    "get_/whisk_system/utils/echo"
+                                    "get_/lambda/utils/echo"
                                 ],
                                 "execute": [
                                     {
                                         "invoke": {
-                                            "target-url": "https://172.17.0.1/api/v1/web/whisk.system/default/test1a.http",
+                                            "target-url": "https://172.17.0.1/api/v1/web/lambda/default/test1a.http",
                                             "verb": "get"
                                         }
                                     }
@@ -84,12 +84,12 @@
                             },
                             {
                                 "operations": [
-                                    "post_/whisk_system/utils/echo"
+                                    "post_/lambda/utils/echo"
                                 ],
                                 "execute": [
                                     {
                                         "invoke": {
-                                            "target-url": "https://172.17.0.1/api/v1/web/whisk.system/default/test1a.http",
+                                            "target-url": "https://172.17.0.1/api/v1/web/lambda/default/test1a.http",
                                             "verb": "post"
                                         }
                                     }
@@ -97,12 +97,12 @@
                             },
                             {
                                 "operations": [
-                                    "post_/whisk_system/utils/split"
+                                    "post_/lambda/utils/split"
                                 ],
                                 "execute": [
                                     {
                                         "invoke": {
-                                            "target-url": "https://172.17.0.1/api/v1/web/whisk.system/default/test1a.http",
+                                            "target-url": "https://172.17.0.1/api/v1/web/lambda/default/test1a.http",
                                             "verb": "post"
                                         }
                                     }

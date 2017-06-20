@@ -37,27 +37,27 @@ import common.WskProps
 @RunWith(classOf[JUnitRunner])
 class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers with StreamLogging {
 
-  val systemId: String = "whisk.system"
+  val systemId: String = "lambda"
   override implicit val wskprops = WskProps(authKey = WskAdmin.listKeys(systemId)(0)._1, namespace = systemId)
   val wsk: common.Wsk = new Wsk
 
   it should "reject apimgmt actions that are invoked with not enough parameters" in {
     val invalidArgs = Seq(
       //getApi
-      ("/whisk.system/apimgmt/getApi", ANY_ERROR_EXIT, "Invalid authentication.", Seq()),
+      ("/lambda/apimgmt/getApi", ANY_ERROR_EXIT, "Invalid authentication.", Seq()),
       //deleteApi
       (
-        "/whisk.system/apimgmt/deleteApi",
+        "/lambda/apimgmt/deleteApi",
         ANY_ERROR_EXIT,
         "Invalid authentication.",
         Seq("-p", "basepath", "/ApiGwRoutemgmtActionTests_bp")),
       (
-        "/whisk.system/apimgmt/deleteApi",
+        "/lambda/apimgmt/deleteApi",
         ANY_ERROR_EXIT,
         "basepath is required",
         Seq("-p", "__ow_user", "_", "-p", "accesstoken", "TOKEN")),
       (
-        "/whisk.system/apimgmt/deleteApi",
+        "/lambda/apimgmt/deleteApi",
         ANY_ERROR_EXIT,
         "When specifying an operation, the path is required",
         Seq(
@@ -75,22 +75,22 @@ class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers wi
           "get")),
       //createApi
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "apidoc is required",
         Seq("-p", "__ow_user", "_", "-p", "accesstoken", "TOKEN")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "apidoc is missing the namespace field",
         Seq("-p", "__ow_user", "_", "-p", "accesstoken", "TOKEN", "-p", "apidoc", "{}")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "apidoc is missing the gatewayBasePath field",
         Seq("-p", "__ow_user", "_", "-p", "accesstoken", "TOKEN", "-p", "apidoc", """{"namespace":"_"}""")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "apidoc is missing the gatewayPath field",
         Seq(
@@ -104,7 +104,7 @@ class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers wi
           "apidoc",
           """{"namespace":"_","gatewayBasePath":"/ApiGwRoutemgmtActionTests_bp"}""")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "apidoc is missing the gatewayMethod field",
         Seq(
@@ -118,7 +118,7 @@ class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers wi
           "apidoc",
           """{"namespace":"_","gatewayBasePath":"/ApiGwRoutemgmtActionTests_bp","gatewayPath":"ApiGwRoutemgmtActionTests_rp"}""")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "apidoc is missing the action field",
         Seq(
@@ -132,7 +132,7 @@ class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers wi
           "apidoc",
           """{"namespace":"_","gatewayBasePath":"/ApiGwRoutemgmtActionTests_bp","gatewayPath":"ApiGwRoutemgmtActionTests_rp","gatewayMethod":"get"}""")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "action is missing the backendMethod field",
         Seq(
@@ -146,7 +146,7 @@ class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers wi
           "apidoc",
           """{"namespace":"_","gatewayBasePath":"/ApiGwRoutemgmtActionTests_bp","gatewayPath":"ApiGwRoutemgmtActionTests_rp","gatewayMethod":"get","action":{}}""")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "action is missing the backendUrl field",
         Seq(
@@ -160,7 +160,7 @@ class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers wi
           "apidoc",
           """{"namespace":"_","gatewayBasePath":"/ApiGwRoutemgmtActionTests_bp","gatewayPath":"ApiGwRoutemgmtActionTests_rp","gatewayMethod":"get","action":{"backendMethod":"post"}}""")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "action is missing the namespace field",
         Seq(
@@ -174,7 +174,7 @@ class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers wi
           "apidoc",
           """{"namespace":"_","gatewayBasePath":"/ApiGwRoutemgmtActionTests_bp","gatewayPath":"ApiGwRoutemgmtActionTests_rp","gatewayMethod":"get","action":{"backendMethod":"post","backendUrl":"URL"}}""")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "action is missing the name field",
         Seq(
@@ -188,7 +188,7 @@ class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers wi
           "apidoc",
           """{"namespace":"_","gatewayBasePath":"/ApiGwRoutemgmtActionTests_bp","gatewayPath":"ApiGwRoutemgmtActionTests_rp","gatewayMethod":"get","action":{"backendMethod":"post","backendUrl":"URL","namespace":"_"}}""")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "action is missing the authkey field",
         Seq(
@@ -202,7 +202,7 @@ class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers wi
           "apidoc",
           """{"namespace":"_","gatewayBasePath":"/ApiGwRoutemgmtActionTests_bp","gatewayPath":"ApiGwRoutemgmtActionTests_rp","gatewayMethod":"get","action":{"backendMethod":"post","backendUrl":"URL","namespace":"_","name":"N"}}""")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "swagger and gatewayBasePath are mutually exclusive and cannot be specified together",
         Seq(
@@ -216,7 +216,7 @@ class WskApiGwTests extends BaseApiGwTests with WskActorSystem with JsHelpers wi
           "apidoc",
           """{"namespace":"_","gatewayBasePath":"/ApiGwRoutemgmtActionTests_bp","gatewayPath":"ApiGwRoutemgmtActionTests_rp","gatewayMethod":"get","action":{"backendMethod":"post","backendUrl":"URL","namespace":"_","name":"N","authkey":"XXXX"},"swagger":{}}""")),
       (
-        "/whisk.system/apimgmt/createApi",
+        "/lambda/apimgmt/createApi",
         ANY_ERROR_EXIT,
         "apidoc field cannot be parsed. Ensure it is valid JSON",
         Seq("-p", "__ow_user", "_", "-p", "accesstoken", "TOKEN", "-p", "apidoc", "{1:[}}}")))
