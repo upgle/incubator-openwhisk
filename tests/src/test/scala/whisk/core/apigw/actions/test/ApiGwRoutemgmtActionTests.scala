@@ -48,7 +48,7 @@ abstract class ApiGwRoutemgmtActionTests
     with JsHelpers
     with StreamLogging {
 
-  val systemId = "whisk.system"
+  val systemId = "lambda"
   implicit val wskprops = WskProps(authKey = WskAdmin.listKeys(systemId)(0)._1, namespace = systemId)
   val wsk: BaseWsk
 

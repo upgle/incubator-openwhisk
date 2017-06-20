@@ -206,7 +206,7 @@ db:
   instances: "{{ groups['db'] | length }}"
   authkeys:
   - guest
-  - whisk.system
+  - lambda
   whisk:
     actions: "{{ db_prefix }}whisks"
     actions_ddoc: "whisks.v2"
@@ -232,6 +232,8 @@ linux:
 couchdb:
   version: 2.1
 
+docker_image_prefix: lambda
+docker_image_tag: latest
 docker:
   # The user to install docker for. Defaults to the ansible user if not set. This will be the user who is able to run
   # docker commands on a machine setup with prereq_build.yml
@@ -259,13 +261,13 @@ cli:
     become: "{{ cli_dir_become | default(false) }}"
 
 # The default name space is /whisk.system. The catalog namespace must begin with a slash "/".
-catalog_namespace: "/whisk.system"
+catalog_namespace: "/lambda"
 
 # The catalog_auth_key is used to determine the secret key to authenticate the openwhisk service.
 # The value for this variable can be set to either the secret key itself or the file, which
 # saves the secret key.
 # By default, we take the key from {{ openwhisk_home }}/ansible/files/auth.whisk.system.
-catalog_auth_key: "{{ openwhisk_home }}/ansible/files/auth.whisk.system"
+catalog_auth_key: "{{ openwhisk_home }}/ansible/files/auth.lambda"
 
 # The catalog_repos is used to specify all the catalog names and repository URLs,
 # so that openwhisk knows where to download the catalog and install them. The key
