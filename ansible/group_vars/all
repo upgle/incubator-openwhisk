@@ -210,6 +210,9 @@ db:
     actions: "{{ db_prefix }}whisks"
     activations: "{{ db_prefix }}activations"
     auth: "{{ db_prefix }}subjects"
+    service:
+      mappings: "service_mappings"
+      lambda_id: "171f0fa99c6c4b028b3af02962a7ccc5"
 
 apigateway:
   port:
