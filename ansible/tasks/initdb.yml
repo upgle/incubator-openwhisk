@@ -34,3 +34,37 @@
         }]
       }
   with_items: "{{ db.authkeys }}"
+
+
+- include_tasks: db/recreateDb.yml
+  vars:
+    dbName: "{{ db.whisk.service.mappings }}"
+    forceRecreation: False
+
+- include_tasks: db/recreateDoc.yml
+  vars:
+    dbName: "{{ db.whisk.service.mappings }}"
+    doc: "{{ lookup('file', '{{ item }}') }}"
+  with_items:
+    - "{{ openwhisk_home }}/ansible/files/service_mappings_design_document.json"
+
+- name: create necessary "service mappings"
+  include_tasks: db/recreateDoc.yml
+  vars:
+    key: "{{ lookup('file', 'files/auth.{{ item }}') }}"
+    dbName: "{{ db.whisk.service.mappings }}"
+    doc: >
+      {
+         "_id": "{{ item }}",
+         "service": "{{ db.whisk.service.lambda_id }}",
+         "namespace": {
+             "id": "{{ item }}",
+             "name": "{{ item }}",
+             "description": "",
+             "attached": true,
+             "url": "/lambda/workspace/{{ item }}",
+             "uuid": "{{ key.split(":")[0] }}",
+             "key": "{{ key.split(":")[1] }}"
+         }
+      }
+  with_items: "{{ db.authkeys }}"
