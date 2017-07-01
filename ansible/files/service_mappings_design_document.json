@@ -1,0 +1,9 @@
+{
+   "_id": "_design/namespaces",
+   "language": "javascript",
+   "views": {
+       "namespaces": {
+           "map": "function(doc) {\n    if(doc.namespace) {\n    emit(doc.service, doc.namespace);    \n}\n}"
+       }
+   }
+}
