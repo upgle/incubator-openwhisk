@@ -1,0 +1,73 @@
+{
+    "logLevel": "{{ neloagent.log_level }}",
+    "interface": "{{ neloagent.interface }}",
+
+    "server": [
+        {
+            "source": [
+                {
+                    "type": "tail",
+                    "projectName": "{{ neloagent.project_name }}",
+                    "projectVersion": "{{ neloagent.project_version }}",
+                    "logSource": "agent",
+                    "logType": "invoker",
+                    "tailContent": [
+                       {% for ip in groups['invokers'] %}
+                       {% if groups['invokers'].index(ip) > 0 %}
+                            ,
+                       {% endif %}
+                            {
+                                "path": "{{ whisk_logs_dir }}/lambdalog/invoker{{ groups['invokers'].index(ip) }}_logs.log"
+                            }
+                       {% endfor %}
+                    ],
+                    "speed": 30000
+                },
+                {
+                    "type": "tail",
+                    "projectName": "{{ neloagent.project_name }}",
+                    "projectVersion": "{{ neloagent.project_version }}",
+                    "logSource": "agent",
+                    "logType": "controller",
+                    "tailContent": [
+                       {% for ip in groups['controllers'] %}
+                       {% if groups['controllers'].index(ip) > 0 %}
+                            ,
+                       {% endif %}
+                           {
+                               "path": "{{ whisk_logs_dir }}/lambdalog/controller{{ groups['controllers'].index(ip) }}_logs.log"
+                           }
+                       {% endfor %}
+                    ],
+                    "speed": 30000
+                },
+                {
+                    "type": "tail",
+                    "projectName": "{{ neloagent.project_name }}",
+                    "projectVersion": "{{ neloagent.project_version }}",
+                    "logSource": "agent",
+                    "logType": "nginx",
+                    "tailContent": [
+                        {
+                            "path": "{{ whisk_logs_dir }}/lambdalog/nginx_access.log"
+                        }
+                    ],
+                    "speed": 30000
+                }
+            ],
+            "sink": [
+                {
+                    "type": "thrift",
+                    "server": [
+                        {
+                            "ip": "{{ neloagent.sink_server_ip }}",
+                            "port": {{ neloagent.sink_server_port }}
+                        }
+                    ],
+                    "thread": 2,
+                    "queueSize": 200
+                }
+            ]
+        }
+    ]
+}
