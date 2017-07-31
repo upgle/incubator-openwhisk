@@ -1,0 +1,6 @@
+---
+# This playbook deploys neloagent.
+
+- hosts: neloagents
+  roles:
+  - neloagent
