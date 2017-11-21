@@ -2,5 +2,6 @@
 # This playbook deploys Openwhisk Controllers.  
 
 - hosts: controllers
+  serial: '1'
   roles:
   - controller
