@@ -5,6 +5,7 @@
 # SDKs for blackbox and iOS get published to NGINX also.
 
 - hosts: edge
+  serial: '1'
   roles:
   - nginx
   - cli

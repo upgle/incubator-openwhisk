@@ -94,5 +94,11 @@ http {
             autoindex on;
             root /etc/nginx;
         }
+
+        # provide healcheck url to L4:/monitor/l7check.nhn
+        location /monitor {
+            root /etc/nginx/;
+            expires off;
+        }
     }
 }
