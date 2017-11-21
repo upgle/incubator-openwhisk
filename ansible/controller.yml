@@ -32,5 +32,6 @@
       # Join an akka cluster rather than running standalone akka
       - "join_akka_cluster"
 
+  serial: '1'
   roles:
     - controller
