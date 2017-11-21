@@ -24,5 +24,6 @@
     #   something like "{{ groups['firstinvokergroup']|length }}"
     invoker_index_base: 0
 
+  serial: '1'
   roles:
     - invoker

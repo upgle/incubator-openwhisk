@@ -211,6 +211,7 @@ nginx:
   wpn:
     router: "{{ nginx_wpn_router | default('1') }}"
   special_users: "{{ nginx_special_users | default('[]') }}"
+  sleeptime: "{{ nginx_sleep_time | default('60s') }}"
 
 # These are the variables to define all database relevant settings.
 # The authKeys are the users, that are initially created to use OpenWhisk.
