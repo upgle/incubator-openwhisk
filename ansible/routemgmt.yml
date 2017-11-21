@@ -4,6 +4,7 @@
 - include: properties.yml
 
 - hosts: ansible
+  serial: '1'
   roles:
   - cli-install
   - routemgmt
