@@ -50,6 +50,19 @@
   retries: "{{ docker.pull.retries }}"
   delay: "{{ docker.pull.delay }}"
 
+- name: ensure nginx l7check directory is created with permissions
+  file:
+    path: "{{ nginx.confdir }}/monitor"
+    state: directory
+
+- name: delete the L7 health check file from nginx
+  file:
+    path: "{{ nginx.confdir }}/monitor/l7check.nhn"
+    state: absent
+
+- name: Sleep some time in order to switch traffic to alive node
+  shell: sleep {{ nginx.sleeptime }}
+
 - name: (re)start nginx
   docker_container:
     name: nginx
@@ -67,3 +80,12 @@
       - "{{ nginx.port.http }}:80"
       - "{{ nginx.port.api }}:443"
       - "{{ nginx.port.adminportal }}:8443"
+
+- name: ensure L7 health check file exist on nginx
+  copy:
+    content: ""
+    dest: "{{ nginx.confdir }}/monitor/l7check.nhn"
+    force: no
+
+- name: Sleep some time in order to let lb find this nginx node
+  shell: sleep {{ nginx.sleeptime }}

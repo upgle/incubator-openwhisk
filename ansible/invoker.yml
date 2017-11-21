@@ -4,5 +4,6 @@
 # This playbook deploys Openwhisk Invokers.
 
 - hosts: invokers
+  serial: '1'
   roles:
   - invoker
