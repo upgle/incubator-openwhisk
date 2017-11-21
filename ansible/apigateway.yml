@@ -1,8 +1,10 @@
 
 - hosts: redis
+  serial: '1'
   roles:
   - redis
 
 - hosts: apigateway
+  serial: '1'
   roles:
   - apigateway
