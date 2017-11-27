@@ -85,6 +85,9 @@
     env:
       TZ: "{{ docker.timezone }}"
 
+- name: make sure nginx log has permission to create hardlink to point it
+  shell: docker exec -t nginx chmod 777 /logs/nginx_access.log
+
 - name: ensure L7 health check file exist on nginx
   copy:
     content: ""
