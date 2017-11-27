@@ -97,6 +97,9 @@
       - "{{ controller.akka.cluster.basePort + groups['controllers'].index(inventory_hostname) }}:{{ controller.akka.cluster.bindPort }}"
     command: /bin/sh -c "export CONTAINER_IP=$(hostname -I); controller/bin/controller {{ groups['controllers'].index(inventory_hostname) }} >> /logs/controller{{ groups['controllers'].index(inventory_hostname) }}_logs.log 2>&1"
 
+- name: make sure controller log has permission to create hardlink to point it
+  shell: docker exec -t controller{{ groups['controllers'].index(inventory_hostname) }} chmod 777 /logs/controller{{ groups['controllers'].index(inventory_hostname) }}_logs.log
+
 - name: wait until the Controller in this host is up and running
   uri:
     url: "http://{{ ansible_host }}:{{ controller.basePort + groups['controllers'].index(inventory_hostname) }}/ping"
