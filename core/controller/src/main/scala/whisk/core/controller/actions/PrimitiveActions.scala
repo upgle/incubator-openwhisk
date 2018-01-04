@@ -102,12 +102,13 @@ protected[actions] trait PrimitiveActions {
     action: ExecutableWhiskActionMetaData,
     payload: Option[JsObject],
     waitForResponse: Option[FiniteDuration],
-    cause: Option[ActivationId])(implicit transid: TransactionId): Future[Either[ActivationId, WhiskActivation]] = {
+    cause: Option[ActivationId],
+    volatile: Boolean = false)(implicit transid: TransactionId): Future[Either[ActivationId, WhiskActivation]] = {
 
     if (action.annotations.isTruthy(WhiskActivation.conductorAnnotation)) {
       invokeComposition(user, action, payload, waitForResponse, cause)
     } else {
-      invokeSimpleAction(user, action, payload, waitForResponse, cause)
+      invokeSimpleAction(user, action, payload, waitForResponse, cause, volatile)
     }
   }
 
@@ -145,7 +146,8 @@ protected[actions] trait PrimitiveActions {
     action: ExecutableWhiskActionMetaData,
     payload: Option[JsObject],
     waitForResponse: Option[FiniteDuration],
-    cause: Option[ActivationId])(implicit transid: TransactionId): Future[Either[ActivationId, WhiskActivation]] = {
+    cause: Option[ActivationId],
+    volatile: Boolean = false)(implicit transid: TransactionId): Future[Either[ActivationId, WhiskActivation]] = {
 
     // merge package parameters with action (action parameters supersede), then merge in payload
     val args = action.parameters merge payload
@@ -170,7 +172,8 @@ protected[actions] trait PrimitiveActions {
       waitForResponse.isDefined,
       args,
       cause = cause,
-      WhiskTracerProvider.tracer.getTraceContext(transid))
+      WhiskTracerProvider.tracer.getTraceContext(transid),
+      volatile = volatile)
 
     val postedFuture = loadBalancer.publish(action, message)
 

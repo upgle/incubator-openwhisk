@@ -216,7 +216,8 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
     parameter(
       'blocking ? false,
       'result ? false,
-      'timeout.as[FiniteDuration] ? WhiskActionsApi.maxWaitForBlockingActivation) { (blocking, result, waitOverride) =>
+      'volatile? false,
+      'timeout.as[FiniteDuration] ? WhiskActionsApi.maxWaitForBlockingActivation) { (blocking, result, volatile, waitOverride) =>
       entity(as[Option[JsObject]]) { payload =>
         getEntity(WhiskActionMetaData.get(entityStore, entityName.toDocId), Some {
           act: WhiskActionMetaData =>
@@ -233,7 +234,7 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
                   .getOrElse(true)
 
                 if (allowInvoke) {
-                  doInvoke(user, actionWithMergedParams, payload, blocking, waitOverride, result)
+                  doInvoke(user, actionWithMergedParams, payload, blocking, waitOverride, result, volatile)
                 } else {
                   terminate(BadRequest, Messages.parametersNotAllowed)
                 }
@@ -251,9 +252,10 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
                        payload: Option[JsObject],
                        blocking: Boolean,
                        waitOverride: FiniteDuration,
-                       result: Boolean)(implicit transid: TransactionId): RequestContext => Future[RouteResult] = {
+                       result: Boolean,
+                       volatile: Boolean = false)(implicit transid: TransactionId): RequestContext => Future[RouteResult] = {
     val waitForResponse = if (blocking) Some(waitOverride) else None
-    onComplete(invokeAction(user, actionWithMergedParams, payload, waitForResponse, cause = None)) {
+    onComplete(invokeAction(user, actionWithMergedParams, payload, waitForResponse, cause = None, volatile = volatile)) {
       case Success(Left(activationId)) =>
         // non-blocking invoke or blocking invoke which got queued instead
         respondWithActivationIdHeader(activationId) {
