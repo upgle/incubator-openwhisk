@@ -220,7 +220,8 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
     parameter(
       'blocking ? false,
       'result ? false,
-      'timeout.as[FiniteDuration] ? WhiskActionsApi.maxWaitForBlockingActivation) { (blocking, result, waitOverride) =>
+      'volatile? false,
+      'timeout.as[FiniteDuration] ? WhiskActionsApi.maxWaitForBlockingActivation) { (blocking, result, volatile, waitOverride) =>
       entity(as[Option[JsObject]]) { payload =>
         getEntity(WhiskActionMetaData, entityStore, entityName.toDocId, Some {
           act: WhiskActionMetaData =>
@@ -230,7 +231,7 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
               case Success(_) =>
                 val actionWithMergedParams = env.map(action.inherit(_)) getOrElse action
                 val waitForResponse = if (blocking) Some(waitOverride) else None
-                onComplete(invokeAction(user, actionWithMergedParams, payload, waitForResponse, cause = None)) {
+                onComplete(invokeAction(user, actionWithMergedParams, payload, waitForResponse, cause = None, volatile = volatile)) {
                   case Success(Left(activationId)) =>
                     // non-blocking invoke or blocking invoke which got queued instead
                     complete(Accepted, activationId.toJsObject)

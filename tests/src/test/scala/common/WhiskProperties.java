@@ -239,6 +239,23 @@ public class WhiskProperties {
         return Integer.parseInt(whiskProperties.getProperty("db.port"));
     }
 
+    public static String getDBUsername() {
+        return whiskProperties.getProperty("db.username");
+    }
+
+    public static String getDBPassword() {
+        return whiskProperties.getProperty("db.password");
+    }
+
+    public static String getDBProtocol() {
+        return whiskProperties.getProperty("db.protocol");
+    }
+
+    public static String getDatabaseName(String name) {
+        String propertyName = String.format("db.whisk.%s", name);
+        return whiskProperties.getProperty(propertyName);
+    }
+
     public static int getControllerBasePort() {
         return Integer.parseInt(whiskProperties.getProperty("controller.host.basePort"));
     }
