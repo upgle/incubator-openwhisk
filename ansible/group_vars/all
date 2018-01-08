@@ -86,6 +86,8 @@ controller:
   loglevel: "{{ controller_loglevel | default(whisk_loglevel) | default('INFO') }}"
   entitlement:
     spi: "{{ controller_entitlement_spi | default('') }}"
+  initTime: "{{ controller_init_time | default('90s') }}"
+  notFinishedActionTime: "{{ controller_not_finished_action_time | default('120s') }}"
   protocol: "{{ controller_protocol | default('https') }}"
   ssl:
     cn: openwhisk-controllers
