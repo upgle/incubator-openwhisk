@@ -66,6 +66,23 @@
   with_indexed_items:
   - "{{ controller.akka.cluster.seedNodes }}"
 
+# Before redeploy controller, should remove that controller instance from nginx
+- name: Judge nginx whether running
+  shell: echo $(docker ps | grep nginx | wc -l)
+  register: nginxExist
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['edge'][0] }}"
+
+- name: Remove the controller from nginx's upstream configuration
+  shell:
+       docker exec -t nginx sh -c "sed -i  \"s/server {{ ansible_host }}:{{ controller.basePort + groups['controllers'].index(inventory_hostname) }}/#server {{ ansible_host }}:{{ controller.basePort + groups['controllers'].index(inventory_hostname) }}/g\"  /etc/nginx/nginx.conf  && nginx -s reload"
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['edge'] }}"
+  when: nginxExist.results[0].stdout != "0"
+
+- name: Sleep some time to wait controller to execute all non-finished actions
+  shell: sleep {{ controller.notFinishedActionTime }}
+
 - name: (re)start controller
   docker_container:
     name: controller{{ groups['controllers'].index(inventory_hostname) }}
@@ -162,3 +179,16 @@
   until: result.status == 200
   retries: 12
   delay: 5
+
+# After redeploy controller, should wait about 30s to make sure all invokers report their own health status to controller through kafka
+- name: Sleep some time to make sure all invokers report their own health status to controller
+  shell: sleep {{ controller.initTime }}
+  when: nginxExist.results[0].stdout != "0"
+
+# When all invokers report their status to controller, add the controller instance to nginx
+- name: Add the controller to nginx's upstream configuration
+  shell:
+      docker exec -t nginx sh -c "sed -i  \"s/#server {{ ansible_host }}:{{ controller.basePort + groups['controllers'].index(inventory_hostname) }}/server {{ ansible_host }}:{{ controller.basePort + groups['controllers'].index(inventory_hostname) }}/g\"  /etc/nginx/nginx.conf  && nginx -s reload"
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['edge'] }}"
+  when: nginxExist.results[0].stdout != "0"
