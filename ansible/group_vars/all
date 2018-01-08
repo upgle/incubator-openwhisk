@@ -66,6 +66,8 @@ controller:
   loadbalancer:
     spi: "{{ controller_loadbalancer_spi | default('') }}"
   loglevel: "{{ controller_loglevel | default(whisk_loglevel) | default('INFO') }}"
+  initTime: "{{ controller_init_time | default('90s') }}"
+  notFinishedActionTime: "{{ controller_not_finished_action_time | default('120s') }}"
 
 jmx:
   basePortController: 15000
