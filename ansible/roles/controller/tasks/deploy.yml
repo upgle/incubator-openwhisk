@@ -250,6 +250,50 @@
   include_tasks: "{{ item }}.yml"
   with_items: "{{ controller_plugins | default([]) }}"
 
+# Before redeploy controller, should remove that controller instance from nginx
+- name: Judge nginx whether running
+  shell: echo $(docker ps | grep nginx | wc -l)
+  register: nginxExist
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['edge'][0] }}"
+
+# If controller's ansible task failed in middle, so nginx.conf may be wrong.
+# So need to make sure nginx's configuration is right
+- name: Make sure nginx's configuration is right
+  template:
+    src: "{{ openwhisk_home }}/ansible/roles/nginx/templates/nginx.conf.j2"
+    dest: "{{ nginx.confdir }}/nginx.conf"
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['edge'] }}"
+  when: nginxExist.results[0].stdout != "0"
+
+- name: copy controller ssl.cert for authentication on nginx
+  copy:
+    src: "{{ openwhisk_home }}/ansible/roles/controller/files/{{ controller.ssl.cert }}"
+    dest: "{{ nginx.confdir }}"
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['edge'] }}"
+  when: controller.protocol == 'https' and nginxExist.results[0].stdout != "0"
+
+- name: copy controller ssl.key for authentication on nginx
+  copy:
+    src: "{{ openwhisk_home }}/ansible/roles/controller/files/{{ controller.ssl.key }}"
+    dest: "{{ nginx.confdir }}"
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['edge'] }}"
+  when: controller.protocol == 'https' and nginxExist.results[0].stdout != "0"
+
+- name: Remove the controller from nginx's upstream configuration
+  shell:
+       docker exec -t nginx sh -c "sed -i  \"s/server {{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/#server {{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/g\"  /etc/nginx/nginx.conf  && nginx -s reload"
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['edge'] }}"
+  ignore_errors: True
+  when: nginxExist.results[0].stdout != "0"
+
+- name: Sleep some time to wait controller to execute all non-finished actions
+  shell: sleep {{ controller.notFinishedActionTime }}
+
 - name: (re)start controller
   docker_container:
     name: "{{ controller_name }}"
@@ -270,7 +314,7 @@
       >> /logs/{{ controller_name }}_logs.log 2>&1"
 
 - name: make sure controller log has permission to create hardlink to point it
-  shell: docker exec -t controller{{ groups['controllers'].index(inventory_hostname) }} chmod 777 /logs/controller{{ groups['controllers'].index(inventory_hostname) }}_logs.log
+  shell: docker exec -t {{ controller_name }} chmod 777 /logs/{{ controller_name }}_logs.log
 
 - name: wait until the Controller in this host is up and running
   uri:
@@ -287,3 +331,17 @@
   delay: 5
 
 # VIM: let b:syntastic_yaml_yamllint_args="-c '".expand('%:p:h')."../../../yamllint.yml'"
+
+# After redeploy controller, should wait about 30s to make sure all invokers report their own health status to controller through kafka
+- name: Sleep some time to make sure all invokers report their own health status to controller
+  shell: sleep {{ controller.initTime }}
+  when: nginxExist.results[0].stdout != "0"
+
+# When all invokers report their status to controller, add the controller instance to nginx
+- name: Add the controller to nginx's upstream configuration
+  shell:
+      docker exec -t nginx sh -c "sed -i  \"s/#server {{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/server {{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/g\"  /etc/nginx/nginx.conf  && nginx -s reload"
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['edge'] }}"
+  ignore_errors: True
+  when: nginxExist.results[0].stdout != "0"
