@@ -128,6 +128,8 @@ controller:
   # We recommend to enable HA for the controllers only, if bookkeeping data are shared too. (localBookkeeping: false)
   ha: "{{ controller_enable_ha | default(True) and groups['controllers'] | length > 1 }}"
   loglevel: "{{ controller_loglevel | default(whisk_loglevel) | default('INFO') }}"
+  initTime: "{{ controller_init_time | default('90s') }}"
+  notFinishedActionTime: "{{ controller_not_finished_action_time | default('120s') }}"
 
 registry:
   confdir: "{{ config_root_dir }}/registry"
