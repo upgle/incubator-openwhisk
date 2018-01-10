@@ -420,8 +420,10 @@ class ContainerProxy(
 
     // Storing the record. Entirely asynchronous and not waited upon.
     activationWithLogs.map(_.fold(_.activation, identity)).foreach{ a =>
-       if (!(a.response.isSuccess && job.msg.volatile))
-         storeActivation(tid, _, context)
+      if (!(a.response.isSuccess && job.msg.volatile))
+        storeActivation(tid, a, context)
+      else
+        logging.info(this, s"skipping save the activation ${a.activationId}")
     }
 
     // Disambiguate activation errors and transform the Either into a failed/successful Future respectively.
