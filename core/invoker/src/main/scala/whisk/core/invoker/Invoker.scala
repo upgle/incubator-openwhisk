@@ -35,6 +35,7 @@ import whisk.common.Scheduler
 import whisk.core.WhiskConfig
 import whisk.core.WhiskConfig._
 import whisk.core.connector.MessagingProvider
+import whisk.core.connector.MessageProducer
 import whisk.core.connector.PingMessage
 import whisk.core.entity._
 import whisk.core.entity.ExecManifest
@@ -47,6 +48,10 @@ import whisk.common.TransactionId
 case class CmdLineArgs(name: Option[String] = None, id: Option[Int] = None)
 
 object Invoker {
+
+  var messageProducer: Option[MessageProducer] = None
+
+  var currentInstance: Option[InstanceId] = None
 
   /**
    * An object which records the environment variables required for this component to run.
@@ -171,6 +176,8 @@ object Invoker {
       }
 
     val invokerInstance = InstanceId(assignedInvokerId, invokerName)
+    currentInstance = Some(invokerInstance)
+
     val msgProvider = SpiLoader.get[MessagingProvider]
     if (!msgProvider.ensureTopic(config, topic = "invoker" + assignedInvokerId, topicConfig = "invoker")) {
       abort(s"failure during msgProvider.ensureTopic for topic invoker$assignedInvokerId")
@@ -181,12 +188,16 @@ object Invoker {
     } catch {
       case e: Exception => abort(s"Failed to initialize reactive invoker: ${e.getMessage}")
     }
-
+    // HealthProducer and completedProducer can't use same instance, because if some action need to execute long time
+    // and then need to redeploy, should ensure that the long time action's execute result can return back success
+    // through completedProducer
+    val healthProducer = msgProvider.getProducer(config)
     Scheduler.scheduleWaitAtMost(1.seconds)(() => {
-      producer.send("health", PingMessage(invokerInstance)).andThen {
+      healthProducer.send("health", PingMessage(invokerInstance)).andThen {
         case Failure(t) => logger.error(this, s"failed to ping the controller: $t")
       }
     })
+    messageProducer = Some(healthProducer)
 
     val port = config.servicePort.toInt
     BasicHttpService.startHttpService(new InvokerServer().route, port)(
