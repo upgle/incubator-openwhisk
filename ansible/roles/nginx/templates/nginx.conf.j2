@@ -23,6 +23,7 @@ http {
         '$http_referer $http_user_agent $upstream_addr';
     {% endif %}
     access_log /logs/nginx_access.log combined-upstream;
+    error_log /logs/nginx_error.log error;
 
     proxy_http_version 1.1;
     proxy_set_header Connection "";

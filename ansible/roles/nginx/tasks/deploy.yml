@@ -67,7 +67,7 @@
       - "{{ nginx.port.adminportal }}:8443"
 
 - name: make sure nginx log has permission to create hardlink to point it
-  shell: docker exec -t nginx chmod 777 /logs/nginx_access.log
+  shell: docker exec -t nginx chmod 777 -R /logs/
 
 - name: Take in L7 health check file to nginx
   shell: sh {{ nginx.confdir }}/take-in-out-check-file.sh take-in nginx {{ nginx.healthcheckfile }}
