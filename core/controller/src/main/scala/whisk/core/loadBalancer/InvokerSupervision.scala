@@ -139,9 +139,17 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
     val raw = new String(bytes, StandardCharsets.UTF_8)
     PingMessage.parse(raw) match {
       case Success(p: PingMessage) =>
-        self ! p
-        invokerPingFeed ! MessageFeed.Processed
-
+        if(p.instance.instance < 0){
+          // Set the invoker status to UnHealthy immediately. Because if controller receives the success result of
+          // action execute continuously, it will judege that invoker as up status all the time(It will not judge
+          // the invoker status by timeout mechanism)
+          logging.info(this, s"get invoker unhealth message: invoker${Math.abs(p.instance.toInt)-1}")
+          status = status.updated(Math.abs(p.instance.toInt)-1, new InvokerHealth(InvokerInstanceId(Math.abs(p.instance.toInt)-1, p.instance.name), UnHealthy))
+          logStatus()
+        }else{
+          self ! p
+          invokerPingFeed ! MessageFeed.Processed
+        }
       case Failure(t) =>
         invokerPingFeed ! MessageFeed.Processed
         logging.error(this, s"failed processing message: $raw with $t")
