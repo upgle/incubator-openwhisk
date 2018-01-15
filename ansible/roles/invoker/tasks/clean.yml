@@ -1,6 +1,24 @@
 # Licensed to the Apache Software Foundation (ASF) under one or more contributor
 # license agreements; and to You under the Apache License, Version 2.0.
 ---
+- name: Judge current invoker whether deployed
+  shell: echo $(docker ps | grep invoker{{ groups['invokers'].index(inventory_hostname) }} | wc -l)
+  register: invokerDeployed
+
+- name: Disable invoker before remove invoker
+  uri:
+    url: "{{ invoker.protocol }}://{{ ansible_host }}:{{ invoker.port + groups['invokers'].index(inventory_hostname) }}/disable"
+    validate_certs: no
+    client_key: "{{ invoker.confdir }}/invoker{{ groups['invokers'].index(inventory_hostname) }}/{{ invoker.ssl.key }}"
+    client_cert: "{{ invoker.confdir }}/invoker{{ groups['invokers'].index(inventory_hostname) }}/{{ invoker.ssl.cert }}"
+    method: GET
+    status_code: 200
+  ignore_errors: True
+  when: invokerDeployed.stdout != "0"
+
+- name: Sleep some time to wait invoker to execute all non-finished actions
+  shell: sleep {{ invoker.notFinishedActionTime }}
+
 # Remove invoker containers.
 
 - name: get invoker name and index
@@ -45,12 +63,14 @@
     path: "{{ whisk_logs_dir }}/{{ invoker_name }}"
     state: absent
   become: "{{ logs.dir.become }}"
+  when: mode == "clean"
 
 - name: remove invoker conf directory
   file:
     path: "{{ invoker.confdir }}/{{ invoker_name }}"
     state: absent
   become: "{{ invoker.dir.become }}"
+  when: mode == "clean"
 
 # Workaround for orphaned ifstate.veth* files on Ubuntu 14.04
 # See https://github.com/moby/moby/issues/22513
