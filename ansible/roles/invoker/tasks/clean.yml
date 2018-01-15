@@ -14,6 +14,21 @@
 # specific language governing permissions and limitations under the License.
 #
 ---
+- name: Judge current invoker whether deployed
+  shell: echo $(docker ps | grep invoker{{ groups['invokers'].index(inventory_hostname) }} | wc -l)
+  register: invokerDeployed
+
+- name: Disable invoker before remove invoker
+  uri:
+    url: "http://{{ ansible_host }}:{{ invoker.port + groups['invokers'].index(inventory_hostname) }}/disable"
+    method: GET
+    status_code: 200
+  ignore_errors: True
+  when: invokerDeployed.stdout != "0"
+
+- name: Sleep some time to wait invoker to execute all non-finished actions
+  shell: sleep {{ invoker.notFinishedActionTime }}
+
 # Remove invoker containers.
 
 - name: remove invoker
@@ -53,12 +68,14 @@
     path: "{{ whisk_logs_dir }}/invoker{{ groups['invokers'].index(inventory_hostname) }}"
     state: absent
   become: "{{ logs.dir.become }}"
+  when: mode == "clean"
 
 - name: remove invoker conf directory
   file:
     path: "{{ invoker.confdir }}/invoker{{ groups['invokers'].index(inventory_hostname) }}"
     state: absent
   become: "{{ invoker.dir.become }}"
+  when: mode == "clean"
 
 # Workaround for orphaned ifstate.veth* files on Ubuntu 14.04
 # See https://github.com/moby/moby/issues/22513
