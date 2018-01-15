@@ -282,3 +282,6 @@
   until: result.status == 200
   retries: 12
   delay: 5
+
+- name: Sleep enough time to wait this invoker's status in load balancer is really up
+  shell: sleep {{ invoker.upStatusWaitTime }}
