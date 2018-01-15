@@ -25,9 +25,9 @@ import kamon.Kamon
 import whisk.common._
 import whisk.core.WhiskConfig
 import whisk.core.WhiskConfig._
-import whisk.core.connector.{MessagingProvider, PingMessage}
+import whisk.core.connector.{MessageProducer, MessagingProvider, PingMessage}
 import whisk.core.entity.{ExecManifest, InvokerInstanceId}
-import whisk.http.{BasicHttpService, BasicRasService}
+import whisk.http.BasicHttpService
 import whisk.spi.SpiLoader
 import whisk.utils.ExecutionContextFactory
 
@@ -38,6 +38,10 @@ import scala.util.{Failure, Try}
 case class CmdLineArgs(uniqueName: Option[String] = None, id: Option[Int] = None, displayedName: Option[String] = None)
 
 object Invoker {
+
+  var messageProducer: Option[MessageProducer] = None
+
+  var currentInstance: Option[InvokerInstanceId] = None
 
   /**
    * An object which records the environment variables required for this component to run.
@@ -139,6 +143,7 @@ object Invoker {
     val topicBaseName = "invoker"
     val topicName = topicBaseName + assignedInvokerId
     val invokerInstance = InvokerInstanceId(assignedInvokerId, cmdLineArgs.uniqueName, cmdLineArgs.displayedName)
+    currentInstance = Some(invokerInstance)
     val msgProvider = SpiLoader.get[MessagingProvider]
     if (msgProvider.ensureTopic(config, topic = topicName, topicConfig = topicBaseName).isFailure) {
       abort(s"failure during msgProvider.ensureTopic for topic $topicName")
@@ -149,15 +154,19 @@ object Invoker {
     } catch {
       case e: Exception => abort(s"Failed to initialize reactive invoker: ${e.getMessage}")
     }
-
+    // HealthProducer and completedProducer can't use same instance, because if some action need to execute long time
+    // and then need to redeploy, should ensure that the long time action's execute result can return back success
+    // through completedProducer
+    val healthProducer = msgProvider.getProducer(config)
     Scheduler.scheduleWaitAtMost(1.seconds)(() => {
-      producer.send("health", PingMessage(invokerInstance)).andThen {
+      healthProducer.send("health", PingMessage(invokerInstance)).andThen {
         case Failure(t) => logger.error(this, s"failed to ping the controller: $t")
       }
     })
+    messageProducer = Some(healthProducer)
 
     val port = config.servicePort.toInt
-    BasicHttpService.startHttpService(new BasicRasService {}.route, port)(
+    BasicHttpService.startHttpService(new InvokerServer().route, port)(
       actorSystem,
       ActorMaterializer.create(actorSystem))
   }
