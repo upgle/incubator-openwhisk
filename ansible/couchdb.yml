@@ -16,5 +16,6 @@
     when: not db_check.stat.exists
 
 - hosts: db
+  serial: '1'
   roles:
   - couchdb
