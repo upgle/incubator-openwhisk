@@ -1,0 +1,13 @@
+{
+  "_id": "_design/lambda",
+  "language": "javascript",
+  "views": {
+    "rules-with-status": {
+      "map": "function (doc) {\n  var PATHSEP = \"/\";\n\n  var isTrigger = function (doc) { return (doc.exec === undefined && doc.binding === undefined && doc.parameters !== undefined) };\n  var isRule = function (doc) {  return (doc.trigger !== undefined) };\n\n  if (isRule(doc)) try {\n    emit([doc.namespace,doc.name], {namespace: doc.namespace, name: doc.name, version: doc.version, publish: doc.publish, annotations: doc.annotations, updated: doc.updated, action: doc.action, trigger: doc.trigger });\n  } catch (e) {}\n\n  if (isTrigger(doc)) try {\n    if(doc.rules){\n      for (var rule in doc.rules) {\n        var temp = rule.split(PATHSEP);\n        emit([temp[0], temp[1]], {\"status\" : doc.rules[rule].status } );                  \n      }          \n    }    \n  } catch (e) {}\n}",
+      "reduce": "function (keys, values, reduce) {\n  if(reduce){\n    var merged = [].concat.apply([], values);\n    if (merged.length == 1) {\n      return merged[0];\n    } else if(merged.length > 1){\n      for (var attrname in merged[1]) { merged[0][attrname] = merged[1][attrname]; }\n      return merged[0];\n    }\n  }\n  return values;\n}"
+    },
+    "bindings": {
+      "map": "function (doc) {\n  var PATHSEP = '/';\n  var isPackage = function (doc) {  return (doc.binding !== undefined) };\n  \n  if (isPackage(doc) && Object.keys(doc.binding).length !== 0) try {\n    var date = new Date(doc.start || doc.updated);\n    emit([doc.namespace, date.getTime(), doc.name], {namespace: doc.namespace, name: doc.name, version: doc.version, publish: doc.publish, annotations: doc.annotations, binding: doc.binding});\n  } catch (e) {}\n}"
+    }
+  }
+}
