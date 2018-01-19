@@ -1,9 +1,16 @@
 {
-   "_id": "_design/namespaces",
-   "language": "javascript",
-   "views": {
-       "namespaces": {
-           "map": "function(doc) {\n    if(doc.namespace) {\n    emit(doc.service, doc.namespace);    \n}\n}"
-       }
-   }
+  "_id": "_design/namespaces",
+  "language": "javascript",
+  "views": {
+    "namespace-count": {
+      "reduce": "_count",
+      "map": "function(doc) {\n  if(doc.namespace) {\n    emit(doc.namespace.id, 1);    \n  }\n}"
+    },
+    "namespace-mapping": {
+      "map": "function(doc) {\n  if(doc.namespace) {\n    var value = {\n      _id: doc._id,\n      _rev: doc._rev,\n      service: doc.service,\n      namespace: doc.namespace\n    }\n    emit(doc.service, value);    \n  }\n}"
+    },
+    "service": {
+      "map": "function (doc) {\n  emit(doc._id, doc.service);\n}"
+    }
+  }
 }
