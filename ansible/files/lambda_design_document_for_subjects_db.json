@@ -1,0 +1,12 @@
+{
+  "_id": "_design/lambda",
+  "language": "javascript",
+  "views": {
+    "limits": {
+      "map": "function (doc) {\n  function isLimits(doc) {\n    var suffix = \"/limits\";\n    return doc._id.indexOf(suffix, doc._id.length - suffix.length) !== -1;\n  };\n  if (isLimits(doc)) {\n    emit(doc._id.slice(0, -7), doc);  \n  }\n}"
+    },
+    "metadata": {
+      "map": "function (doc) {\n  function isLimits(doc) {\n    var suffix = \"/metadata\";\n    return doc._id.indexOf(suffix, doc._id.length - suffix.length) !== -1;\n  };\n  if (isLimits(doc)) {\n    emit(doc._id.slice(0, -9), doc);  \n  }\n}"
+    }
+  }
+}
