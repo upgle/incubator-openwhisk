@@ -84,6 +84,8 @@ dependencies {
         exclude group: 'com.fasterxml.jackson.dataformat'
     }
     scoverage gradle.scoverage.deps
+
+    compile fileTree(dir: 'libs', include: ['*.jar'])
 }
 
 tasks.withType(ScalaCompile) {
