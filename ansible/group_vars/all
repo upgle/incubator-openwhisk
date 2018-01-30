@@ -323,6 +323,10 @@ metrics:
     enabled: "{{ metrics_kamon | default(false) }}"
     host: "{{ metrics_kamon_statsd_host | default('') }}"
     port: "{{ metrics_kamon_statsd_port | default('8125') }}"
+  npot:
+    datasource_url: "{{ metrics_npot_datasource_url | default('') }}"
+    datasource_id: "{{ metrics_npot_datasource_id | default('') }}"
+    datasource_key: "{{ metrics_npot_datasource_key | default('') }}"
 
 # Nelo relative configuration
 neloagent:
