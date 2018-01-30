@@ -73,6 +73,8 @@ dependencies {
     compile 'io.zipkin.reporter2:zipkin-reporter:2.6.1'
 
     scoverage gradle.scoverage.deps
+
+    compile fileTree(dir: 'libs', include: ['*.jar'])
 }
 
 tasks.withType(ScalaCompile) {
