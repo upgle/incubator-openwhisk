@@ -157,6 +157,7 @@ invoker:
   useRunc: "{{ invoker_use_runc | default(true) }}"
   docker:
     become: "{{ invoker_docker_become | default(false) }}"
+    volumes: "{{ invoker_docker_volumes | default([]) }}"
   loglevel: "{{ invoker_loglevel | default(whisk_loglevel) | default('INFO') }}"
   notFinishedActionTime: "{{ invoker_not_finished_action_time | default('70s') }}"
   upStatusWaitTime: "{{ invoker_up_status_wait_time | default('60s') }}"
