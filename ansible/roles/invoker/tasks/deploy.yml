@@ -239,6 +239,9 @@
         -v {{ invoker.confdir }}/invoker{{ groups['invokers'].index(inventory_hostname) }}:/conf
         -v {{ dockerInfo["DockerRootDir"] }}/containers/:/containers
         -v {{ docker_sock | default('/var/run/docker.sock') }}:/var/run/docker.sock
+        {% for volume in (invoker.docker.volumes | default([])) %}
+        -v {{ volume }}
+        {% endfor %}
         -p {{ invoker.port + groups['invokers'].index(inventory_hostname) }}:8080
         {% if jmx.enabled %} -p {{ jmx.basePortInvoker + groups['invokers'].index(inventory_hostname) }}:{{ jmx.basePortInvoker + groups['invokers'].index(inventory_hostname) }} {% endif %}
         {% if jmx.enabled %} -p {{ jmx.rmiBasePortInvoker + groups['invokers'].index(inventory_hostname) }}:{{ jmx.rmiBasePortInvoker + groups['invokers'].index(inventory_hostname) }} {% endif %}
