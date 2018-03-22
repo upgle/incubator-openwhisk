@@ -22,11 +22,9 @@ import akka.actor.ActorSystem
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext
 import scala.util.Failure
-import whisk.common.TransactionId
+import whisk.common._
 
 import scala.util.Success
-import whisk.common.LoggingMarkers
-import whisk.common.Logging
 import whisk.core.ConfigKeys
 import pureconfig.loadConfigOrThrow
 import akka.event.Logging.{ErrorLevel, InfoLevel}
@@ -70,8 +68,13 @@ class RuncClient(timeouts: RuncClientTimeouts = loadConfigOrThrow[RuncClientTime
       LoggingMarkers.INVOKER_RUNC_CMD(args.head),
       s"running ${cmd.mkString(" ")} (timeout: $timeout)",
       logLevel = InfoLevel)
+    val t0 = System.currentTimeMillis()
     executeProcess(cmd, timeout).andThen {
-      case Success(_) => transid.finished(this, start, logLevel = InfoLevel)
+      case Success(_) => {
+        val t1 = System.currentTimeMillis()
+        MetricEmitter.emitHistogramMetric(LogMarkerToken("runc", "runCmd", "duration", Some(args.head), Map("cmd" -> args.head)), t1 - t0)
+        transid.finished(this, start, logLevel = InfoLevel)
+      }
       case Failure(t) => transid.failed(this, start, t.getMessage, ErrorLevel)
     }
   }
