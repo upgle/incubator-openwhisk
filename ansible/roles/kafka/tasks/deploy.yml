@@ -15,6 +15,22 @@
     src: "files/{{ kafka.ssl.keystore.name }}"
     dest: "{{ config_root_dir }}/kafka/certs"
 
+- name: prepare kafka ports
+  set_fact:
+    ports_to_expose: ["{{ kafka.port + groups['kafkas'].index(inventory_hostname) }}:{{ kafka.port + groups['kafkas'].index(inventory_hostname) }}", "{{ kafka.advertisedPort + groups['kafkas'].index(inventory_hostname) }}:{{ kafka.advertisedPort + groups['kafkas'].index(inventory_hostname) }}"]
+
+- name: expose additional ports if jmxremote is enabled
+  when: jmx.enabled
+  set_fact:
+    ports_to_expose: "{{ ports_to_expose }} + [ \"{{ jmx.basePortKafka + groups['kafkas'].index(inventory_hostname) }}:{{ jmx.basePortKafka + groups['kafkas'].index(inventory_hostname) }}\" ] + [ \"{{ jmx.rmiBasePortKafka + groups['kafkas'].index(inventory_hostname) }}:{{ jmx.rmiBasePortKafka + groups['kafkas'].index(inventory_hostname) }}\" ]"
+
+- name: add kafka jmx env vars if jmxremote is enabled
+  when: jmx.enabled
+  set_fact:
+    kafka_jmx_env_vars:
+      "KAFKA_JMX_OPTS": "-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.local.only=false -Dcom.sun.management.jmxremote.authenticate=false -Djava.rmi.server.hostname={{ ansible_host }} -Dcom.sun.management.jmxremote.rmi.port={{ jmx.rmiBasePortKafka + groups['kafkas'].index(inventory_hostname) }} -Dcom.sun.management.jmxremote.port={{ jmx.basePortKafka + groups['kafkas'].index(inventory_hostname) }}"
+      "JMX_PORT": "{{ jmx.basePortKafka + groups['kafkas'].index(inventory_hostname) }}"
+
 - name: add kafka default env vars
   set_fact:
     kafka_env_vars:
@@ -67,6 +83,11 @@
   set_fact:
     kafka_env_vars: "{{ kafka_env_vars | combine(kafka_non_ssl_vars) }}"
 
+- name: "join kafka jmx env vars if jmxremote is enabled"
+  when: jmx.enabled
+  set_fact:
+    kafka_env_vars: "{{ kafka_env_vars | combine(kafka_jmx_env_vars) }}"
+
 - name: "(re)start kafka using '{{ kafka_image }}' "
   vars:
     zookeeper_idx: "{{ groups['kafkas'].index(inventory_hostname) % (groups['zookeepers'] | length) }}"
@@ -78,9 +99,7 @@
     recreate: true
     restart_policy: "{{ docker.restart.policy }}"
     env: "{{ kafka_env_vars }}"
-    ports:
-      - "{{ kafka.port + groups['kafkas'].index(inventory_hostname) }}:{{ kafka.port + groups['kafkas'].index(inventory_hostname) }}"
-      - "{{ kafka.advertisedPort + groups['kafkas'].index(inventory_hostname) }}:{{ kafka.advertisedPort + groups['kafkas'].index(inventory_hostname) }}"
+    ports: "{{ ports_to_expose }}"
     volumes:
       - "{{ config_root_dir }}/kafka/certs:/config"
     pull: true
@@ -93,3 +112,10 @@
   until: (('[Kafka Server ' + (groups['kafkas'].index(inventory_hostname)|string) + '], started') in result.stdout)
   retries: 10
   delay: 5
+
+- name: create kafka jmx.yml
+  template:
+    src: "{{ openwhisk_home }}/ansible/roles/kafka/templates/jmx.yml.j2"
+    dest: "{{ kafka.confdir }}/jmx.yml"
+  ignore_errors: True
+  when: groups['kafkas'].index(inventory_hostname) + 1 == groups['kafkas'] | length or ansible_host != hostvars[groups['kafkas'][groups['kafkas'].index(inventory_hostname) + 1 ]]['ansible_host']

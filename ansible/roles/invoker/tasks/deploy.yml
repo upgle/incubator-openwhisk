@@ -264,3 +264,10 @@
 
 - name: Sleep enough time to wait this invoker's status in load balancer is really up
   shell: sleep {{ invoker.upStatusWaitTime }}
+
+- name: create invoker jmx.yml
+  template:
+    src: "{{ openwhisk_home }}/ansible/roles/invoker/templates/jmx.yml.j2"
+    dest: "{{ invoker.confdir }}/jmx.yml"
+  ignore_errors: True
+  when: groups['invokers'].index(inventory_hostname) + 1 == groups['invokers'] | length or ansible_host != hostvars[groups['invokers'][groups['invokers'].index(inventory_hostname) + 1 ]]['ansible_host']
