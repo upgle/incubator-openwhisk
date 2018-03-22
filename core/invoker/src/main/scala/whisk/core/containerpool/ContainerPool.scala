@@ -18,7 +18,9 @@
 package whisk.core.containerpool
 
 import scala.collection.immutable
-import whisk.common.{AkkaLogging, LoggingMarkers, TransactionId}
+
+import whisk.common._
+
 import akka.actor.{Actor, ActorRef, ActorRefFactory, Props}
 import whisk.core.entity._
 import whisk.core.entity.size._
@@ -84,6 +86,12 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       akka.event.Logging.InfoLevel)
   }
 
+  def logContainerPool(): Unit = {
+    MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "containerPool", "count", Some("free"), Map("state" -> "free")), freePool.size)
+    MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "containerPool", "count", Some("busy"), Map("state" -> "busy")), busyPool.size)
+    MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "containerPool", "count", Some("prewarmed"), Map("state" -> "prewarmed")), prewarmedPool.size)
+  }
+
   def receive: Receive = {
     // A job to run on a container
     //
@@ -146,8 +154,10 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
           } else {
             r.retryLogDeadline
           }
+          MetricEmitter.emitCounterMetric(LogMarkerToken("invoker", "runRetry", "count"))
           self ! Run(r.action, r.msg, retryLogDeadline)
       }
+      logContainerPool()
 
     // Container is free to take more work
     case NeedWork(data: WarmedData) =>
@@ -156,10 +166,12 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         busyPool = busyPool - sender()
         feed ! MessageFeed.Processed
       }
+      logContainerPool()
 
     // Container is prewarmed and ready to take work
     case NeedWork(data: PreWarmedData) =>
       prewarmedPool = prewarmedPool + (sender() -> data)
+      logContainerPool()
 
     // Container got removed
     case ContainerRemoved =>
@@ -169,6 +181,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         // container was busy, so there is capacity to accept another job request
         feed ! MessageFeed.Processed
       }
+      logContainerPool()
 
     // This message is received for one of these reasons:
     // 1. Container errored while resuming a warm container, could not process the job, and sent the job back
