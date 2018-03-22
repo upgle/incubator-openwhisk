@@ -26,8 +26,7 @@ import scala.util.Failure
 import org.apache.kafka.clients.consumer.CommitFailedException
 import akka.actor.FSM
 import akka.pattern.pipe
-import whisk.common.Logging
-import whisk.common.TransactionId
+import whisk.common.{LogMarkerToken, Logging, MetricEmitter, TransactionId}
 
 trait MessageConsumer {
 
@@ -142,6 +141,10 @@ class MessageFeed(description: String,
 
     case Event(FillCompleted(messages), _) =>
       outstandingMessages = outstandingMessages ++ messages
+      if (messages.nonEmpty) {
+        MetricEmitter.emitHistogramMetric(LogMarkerToken("kafka", "fillCompletedMessages", "size", None, Map("topic" -> messages.head._1, "description" -> description)), messages.size)
+        MetricEmitter.emitHistogramMetric(LogMarkerToken("kafka", "outstandingMessages", "size", None, Map("topic" -> messages.head._1, "description" -> description)), outstandingMessages.size)
+      }
       sendOutstandingMessages()
 
       if (shouldFillQueue()) {
@@ -235,6 +238,7 @@ class MessageFeed(description: String,
 
   private def updateHandlerCapacity(): Int = {
     logging.debug(self, s"$description received processed msg, current capacity = $handlerCapacity")
+    MetricEmitter.emitHistogramMetric(LogMarkerToken("kafka", "handlerCapacity", "size"), handlerCapacity)
 
     if (handlerCapacity < maximumHandlerCapacity) {
       handlerCapacity += 1
