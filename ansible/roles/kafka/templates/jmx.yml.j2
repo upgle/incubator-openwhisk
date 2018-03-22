@@ -1,0 +1,45 @@
+collects:
+{% set index = groups['kafkas'].index(inventory_hostname) %}
+{% set ip = hostvars[groups['kafkas'][groups['kafkas'].index(inventory_hostname) | int]]['ansible_host'] %}
+{% for i in range(0,index+1)|reverse if hostvars[groups['kafkas'][i]]['ansible_host'] == ip %}
+  - {{ hostvars[groups['kafkas'][i]]['inventory_hostname'] }}
+{% endfor %}
+
+rules:
+{% for i in range(0,index+1)|reverse if hostvars[groups['kafkas'][i]]['ansible_host'] == ip %}
+  - name: {{ hostvars[groups['kafkas'][i]]['inventory_hostname'] }}
+    metrics:
+    - kafka.cluster:type=Partition,name=UnderReplicated,topic=*,partition=* Value topic,partition
+    - kafka.controller:type=ControllerStats,name=* Count
+    - kafka.controller:type=KafkaController,name=* Value
+    - kafka.coordinator:type=GroupMetadataManager,name=* Value
+    - kafka.log:type=Log,name=*,topic=*,partition=* Value topic,partition topic=__consumer_offsets
+    - kafka.log:type=LogCleaner,name=* Value
+    - kafka.log:type=LogCleanerManager,name=* Value
+    - kafka.log:type=LogFlushStats,name=* Count
+    - kafka.network:type=Processor,name=IdlePercent,networkProcessor=* Value networkProcessor
+    - kafka.network:type=RequestChannel,name=RequestQueueSize Value
+    - kafka.network:type=RequestChannel,name=ResponseQueueSize,processor=* Value processor
+    - kafka.network:type=RequestMetrics,name=*,request=* Count request
+    - kafka.network:type=SocketServer,name=NetworkProcessorAvgIdlePercent Value
+    - kafka.server:type=BrokerTopicMetrics,name=*,topic=* Count topic topic=__consumer_offsets
+    - kafka.server:type=DelayedFetchMetrics,name=ExpiresPerSec,fetcherType=* Count fetcherType
+    - kafka.server:type=FetcherLagMetrics,name=ConsumerLag,clientId=*,topic=*,partition=* Value clientId
+    - kafka.server:type=DelayedOperationPurgatory,name=*,delayedOperation=* Value delayedOperation
+    - kafka.server:type=FetcherStats,name=*,clientId=*,brokerHost=*,brokerPort=* Count clientId,brokerHost,brokerPort
+    - kafka.server:type=KafkaRequestHandlerPool,name=RequestHandlerAvgIdlePercent Count
+    - kafka.server:type=KafkaServer,name=BrokerState Value
+    - kafka.server:type=*,client-id=* byte-rate,throttle-time client-id
+    - kafka.server:type=ReplicaFetcherManager,name=*,clientId=* Value clientId
+    - kafka.server:type=ReplicaManager,name=IsrExpandsPerSec Count
+    - kafka.server:type=ReplicaManager,name=IsrShrinksPerSec Count
+    - kafka.server:type=ReplicaManager,name=LeaderCount Value
+    - kafka.server:type=ReplicaManager,name=PartitionCount Value
+    - kafka.server:type=ReplicaManager,name=UnderReplicatedPartitions Value
+    - kafka.server:type=replica-fetcher-metrics,broker-id=*,fetcher-id=* connection-close-rate,connection-count,connection-creation-rate,incoming-byte-rate,io-ratio,io-time-ns-avg,io-wait-ratio,io-wait-time-ns-avg,network-io-rate,outgoing-byte-rate,request-rate,request-size-max,request-size-avg,response-rate,select-rate broker-id,fetcher-id
+    - kafka.server:type=SessionExpireListener,name=* Count
+    jvmPrefix: kafka.jvm
+    jmxUrl: "service:jmx:rmi:///jndi/rmi://{{ ip }}:{{ jmx.basePortKafka + i }}/jmxrmi"
+
+{% endfor %}
+intervalSec: 10
