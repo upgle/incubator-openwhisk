@@ -18,7 +18,7 @@
 package whisk.core.containerpool
 
 import akka.actor.{Actor, ActorRef, ActorRefFactory, Props}
-import whisk.common.{AkkaLogging, LoggingMarkers, TransactionId}
+import whisk.common._
 import whisk.core.connector.MessageFeed
 import whisk.core.entity._
 import whisk.core.entity.size._
@@ -89,6 +89,12 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       LoggingMarkers.INVOKER_CONTAINER_START(containerState),
       s"containerStart containerState: $containerState action: $actionName namespace: $namespaceName activationId: $activationId",
       akka.event.Logging.InfoLevel)
+  }
+
+  def logContainerPool(): Unit = {
+    MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "containerPool", "count", Some("free"), Map("state" -> "free")), freePool.size)
+    MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "containerPool", "count", Some("busy"), Map("state" -> "busy")), busyPool.size)
+    MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "containerPool", "count", Some("prewarmed"), Map("state" -> "prewarmed")), prewarmedPool.size)
   }
 
   def receive: Receive = {
@@ -172,9 +178,11 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               // Add this request to the buffer, as it is not there yet.
               runBuffer = runBuffer.enqueue(r)
             }
+            MetricEmitter.emitCounterMetric(LogMarkerToken("invoker", "runRetry", "count"))
             // As this request is the first one in the buffer, try again to execute it.
             self ! Run(r.action, r.msg, retryLogDeadline)
         }
+        logContainerPool()
       } else {
         // There are currently actions waiting to be executed before this action gets executed.
         // These waiting actions were not able to free up enough memory.
@@ -188,10 +196,12 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         busyPool = busyPool - sender()
         feed ! MessageFeed.Processed
       }
+      logContainerPool()
 
     // Container is prewarmed and ready to take work
     case NeedWork(data: PreWarmedData) =>
       prewarmedPool = prewarmedPool + (sender() -> data)
+      logContainerPool()
 
     // Container got removed
     case ContainerRemoved =>
@@ -201,6 +211,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         // container was busy, so there is capacity to accept another job request
         feed ! MessageFeed.Processed
       }
+      logContainerPool()
 
     // This message is received for one of these reasons:
     // 1. Container errored while resuming a warm container, could not process the job, and sent the job back
