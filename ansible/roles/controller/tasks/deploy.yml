@@ -103,7 +103,7 @@
     controller_args: >-
       {{ controller.arguments }}
       {{ jmx.jvmCommonArgs }}
-      -Djava.rmi.server.hostname={{ inventory_hostname }}
+      -Djava.rmi.server.hostname={{ ansible_host }}
       -Dcom.sun.management.jmxremote.rmi.port={{ jmx_remote_rmi_port }}
       -Dcom.sun.management.jmxremote.port={{ jmx_remote_port }}
 
@@ -343,3 +343,10 @@
   with_items: "{{ groups['edge'] }}"
   ignore_errors: True
   when: nginxExist.results[0].stdout != "0"
+
+- name: create controller jmx.yml
+  template:
+    src: "{{ openwhisk_home }}/ansible/roles/controller/templates/jmx.yml.j2"
+    dest: "{{ controller.confdir }}/jmx.yml"
+  ignore_errors: True
+  when: controller_index | int + 1 == groups['controllers'] | length or ansible_host != hostvars[groups['controllers'][controller_index | int + 1 ]]['ansible_host']
