@@ -33,9 +33,7 @@ import scala.util.Success
 import scala.util.Try
 import akka.event.Logging.{ErrorLevel, InfoLevel}
 import pureconfig.loadConfigOrThrow
-import whisk.common.Logging
-import whisk.common.LoggingMarkers
-import whisk.common.TransactionId
+import whisk.common._
 import whisk.core.ConfigKeys
 import whisk.core.containerpool.ContainerId
 import whisk.core.containerpool.ContainerAddress
@@ -182,8 +180,13 @@ class DockerClient(dockerHost: Option[String] = None,
       LoggingMarkers.INVOKER_DOCKER_CMD(args.head),
       s"running ${cmd.mkString(" ")} (timeout: $timeout)",
       logLevel = InfoLevel)
+    val t0 = System.currentTimeMillis()
     executeProcess(cmd, timeout).andThen {
-      case Success(_) => transid.finished(this, start)
+      case Success(_) => {
+        val t1 = System.currentTimeMillis()
+        MetricEmitter.emitHistogramMetric(LogMarkerToken("docker", "runCmd", "duration", Some(args.head), Map("cmd" -> args.head)), t1 - t0)
+        transid.finished(this, start)
+      }
       case Failure(t) => transid.failed(this, start, t.getMessage, ErrorLevel)
     }
   }
