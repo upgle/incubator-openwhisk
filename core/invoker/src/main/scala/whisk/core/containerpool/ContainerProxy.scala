@@ -29,7 +29,7 @@ import akka.actor.Status.{Failure => FailureMessage}
 import akka.pattern.pipe
 import spray.json._
 import spray.json.DefaultJsonProtocol._
-import whisk.common.{AkkaLogging, Counter, LoggingMarkers, TransactionId}
+import whisk.common._
 import whisk.core.connector.ActivationMessage
 import whisk.core.containerpool.logging.LogCollectingException
 import whisk.core.entity._
@@ -395,7 +395,15 @@ class ContainerProxy(
       }
 
     // Storing the record. Entirely asynchronous and not waited upon.
-    activationWithLogs.map(_.fold(_.activation, identity)).foreach{ a =>
+    activationWithLogs.map(_.fold(_.activation, identity)).foreach { a =>
+      val tags = Map("namespace" -> a.namespace.asString, "action" -> a.name.asString)
+
+      if (a.duration.nonEmpty) {
+        MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "activation", "duration", None, tags), a.duration.get)
+      }
+      if (!a.response.isSuccess) {
+        MetricEmitter.emitCounterMetric(LogMarkerToken("invoker", "activation", "error", None, tags))
+      }
       if (!(a.response.isSuccess && job.msg.volatile))
         storeActivation(tid, a)
       else
