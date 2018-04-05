@@ -27,6 +27,7 @@ import whisk.core.entity.ByteSize
 import whisk.core.entity.CodeExec
 import whisk.core.entity.EntityName
 import whisk.core.entity.ExecutableWhiskAction
+import whisk.core.entity.ExecManifest.PrewarmingConfig
 import whisk.core.entity.size._
 import whisk.core.connector.MessageFeed
 
@@ -55,12 +56,13 @@ case class WorkerData(data: ContainerData, state: WorkerState)
  *
  * @param childFactory method to create new container proxy actor
  * @param feed actor to request more work from
- * @param prewarmConfig optional settings for container prewarming
+ * @param prewarmConfigs set of settings for container prewarming
  * @param poolConfig config for the ContainerPool
+
  */
 class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                     feed: ActorRef,
-                    prewarmConfig: Option[PrewarmingConfig] = None,
+                    prewarmConfigs: Set[PrewarmingConfig] = Set.empty,
                     poolConfig: ContainerPoolConfig)
     extends Actor {
   implicit val logging = new AkkaLogging(context.system.log)
@@ -70,7 +72,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   var prewarmedPool = immutable.Map.empty[ActorRef, ContainerData]
   val logMessageInterval = 10.seconds
 
-  prewarmConfig.foreach { config =>
+  prewarmConfigs.foreach { config =>
     logging.info(this, s"pre-warming ${config.count} ${config.exec.kind} containers")(TransactionId.invokerWarmup)
     (1 to config.count).foreach { _ =>
       prewarmContainer(config.exec, config.memoryLimit)
@@ -215,26 +217,29 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
    * @param kind the kind you want to invoke
    * @return the container iff found
    */
-  def takePrewarmContainer(action: ExecutableWhiskAction): Option[(ActorRef, ContainerData)] =
-    prewarmConfig.flatMap { config =>
-      val kind = action.exec.kind
-      val memory = action.limits.memory.megabytes.MB
-      prewarmedPool
-        .find {
-          case (_, PreWarmedData(_, `kind`, `memory`)) => true
-          case _                                       => false
-        }
-        .map {
-          case (ref, data) =>
-            // Move the container to the usual pool
-            freePool = freePool + (ref -> data)
-            prewarmedPool = prewarmedPool - ref
-            // Create a new prewarm container
+  def takePrewarmContainer(action: ExecutableWhiskAction): Option[(ActorRef, ContainerData)] = {
+    val kind = action.exec.kind
+    val memory = action.limits.memory.megabytes.MB
+    prewarmedPool
+      .find {
+        case (_, PreWarmedData(_, `kind`, `memory`)) => true
+        case _ => false
+      }
+      .map {
+        case (ref, data) =>
+          // Move the container to the usual pool
+          freePool = freePool + (ref -> data)
+          prewarmedPool = prewarmedPool - ref
+          // Create a new prewarm container
+          prewarmConfigs.find { config =>
+            config.exec.kind == kind && config.memoryLimit == memory
+          }.foreach { config =>
             prewarmContainer(config.exec, config.memoryLimit)
+          }
 
-            (ref, data)
-        }
-    }
+          (ref, data)
+      }
+  }
 
   /** Removes a container and updates state accordingly. */
   def removeContainer(toDelete: ActorRef) = {
@@ -293,9 +298,7 @@ object ContainerPool {
   def props(factory: ActorRefFactory => ActorRef,
             poolConfig: ContainerPoolConfig,
             feed: ActorRef,
-            prewarmConfig: Option[PrewarmingConfig] = None) =
-    Props(new ContainerPool(factory, feed, prewarmConfig, poolConfig))
+            prewarmConfigs: Set[PrewarmingConfig] = Set.empty) =
+    Props(new ContainerPool(factory, feed, prewarmConfigs, poolConfig))
 }
 
-/** Contains settings needed to perform container prewarming */
-case class PrewarmingConfig(count: Int, exec: CodeExec[_], memoryLimit: ByteSize)
