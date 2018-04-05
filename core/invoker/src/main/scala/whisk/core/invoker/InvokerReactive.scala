@@ -33,7 +33,6 @@ import whisk.core.containerpool._
 import whisk.core.containerpool.logging.LogStoreProvider
 import whisk.core.database._
 import whisk.core.entity._
-import whisk.core.entity.size._
 import whisk.http.Messages
 import whisk.spi.SpiLoader
 
@@ -142,19 +141,13 @@ class InvokerReactive(config: WhiskConfig, instance: InstanceId, producer: Messa
   private val childFactory = (f: ActorRefFactory) =>
     f.actorOf(ContainerProxy.props(containerFactory.createContainer, ack, store, logsProvider.collectLogs, instance))
 
-  private val prewarmKind = "nodejs:6"
-  private val prewarmExec = ExecManifest.runtimesManifest
-    .resolveDefaultRuntime(prewarmKind)
-    .map(manifest => CodeExecAsString(manifest, "", None))
-    .get
-
   private val pool = actorSystem.actorOf(
     ContainerPool.props(
       childFactory,
       maximumContainers,
       maximumContainers,
       activationFeed,
-      Some(PrewarmingConfig(2, prewarmExec, 256.MB))))
+      ExecManifest.runtimesManifest.prewarmingConfigs))
 
   /** Is called when an ActivationMessage is read from Kafka */
   def processActivationMessage(bytes: Array[Byte]): Future[Unit] = {

@@ -25,6 +25,7 @@ import spray.json.DefaultJsonProtocol._
 import whisk.core.{ConfigKeys, WhiskConfig}
 import whisk.core.entity.Attachments._
 import whisk.core.entity.Attachments.Attached._
+import whisk.core.entity.size._
 
 /**
  * Reads manifest of supported runtimes from configuration file and stores
@@ -76,13 +77,23 @@ protected[core] object ExecManifest {
     val prefix = runtimeManifestConfig.defaultImagePrefix
     val tag = runtimeManifestConfig.defaultImageTag
 
+    var prewarmingConfigs: Set[PrewarmingConfig] = Set.empty
+
     val runtimes = config.fields
       .get("runtimes")
       .map(_.convertTo[Map[String, Set[RuntimeManifest]]].map {
         case (name, versions) =>
           RuntimeFamily(name, versions.map { mf =>
             val img = ImageName(mf.image.name, mf.image.prefix.orElse(prefix), mf.image.tag.orElse(tag))
-            mf.copy(image = img)
+            val new_mf = mf.copy(image = img)
+            mf.stemCells.foreach(_.foreach { stemCell =>
+              if(stemCell.contains("count") && stemCell.contains("memory"))
+                prewarmingConfigs += PrewarmingConfig(stemCell("count"),
+                                                      CodeExecAsString(new_mf, "", None),
+                                                      stemCell("memory").MB)
+            })
+            //keep stemCells in manifest will disturb the test codes, so just set it to None
+            new_mf.copy(stemCells = None)
           })
       }.toSet)
 
@@ -96,8 +107,17 @@ protected[core] object ExecManifest {
       .filter(identity)
       .flatMap(_ => runtimeManifestConfig.localImagePrefix)
 
-    Runtimes(runtimes.getOrElse(Set.empty), blackbox.getOrElse(Set.empty), bypassPullForLocalImages)
+    Runtimes(runtimes.getOrElse(Set.empty), blackbox.getOrElse(Set.empty), prewarmingConfigs, bypassPullForLocalImages)
   }
+
+  /**
+   * The config for prewarmed containers
+   *
+   * @param count count of this kind of prewarmed containers
+   * @param exec specify the metadata of a container
+   * @param memoryLimit memory limit of this kind of container
+   */
+  protected[core] case class PrewarmingConfig(count: Int, exec: CodeExec[_], memoryLimit: ByteSize)
 
   /**
    * Misc options related to runtime manifests
@@ -129,7 +149,8 @@ protected[core] object ExecManifest {
                                              default: Option[Boolean] = None,
                                              attached: Option[Attached] = None,
                                              requireMain: Option[Boolean] = None,
-                                             sentinelledLogs: Option[Boolean] = None) {
+                                             sentinelledLogs: Option[Boolean] = None,
+                                             stemCells: Option[List[Map[String, Int]]] = None) {
 
     protected[entity] def toJsonSummary = {
       JsObject(
@@ -236,6 +257,7 @@ protected[core] object ExecManifest {
    */
   protected[core] case class Runtimes(runtimes: Set[RuntimeFamily],
                                       blackboxImages: Set[ImageName],
+                                      prewarmingConfigs: Set[PrewarmingConfig],
                                       bypassPullForLocalImages: Option[String]) {
 
     val knownContainerRuntimes: Set[String] = runtimes.flatMap(_.versions.map(_.kind))
@@ -286,5 +308,5 @@ protected[core] object ExecManifest {
   }
 
   protected[entity] implicit val imageNameSerdes = jsonFormat3(ImageName.apply)
-  protected[entity] implicit val runtimeManifestSerdes = jsonFormat7(RuntimeManifest)
+  protected[entity] implicit val runtimeManifestSerdes = jsonFormat8(RuntimeManifest)
 }

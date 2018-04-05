@@ -39,8 +39,7 @@ import whisk.common.TransactionId
 import whisk.core.connector.ActivationMessage
 import whisk.core.containerpool._
 import whisk.core.entity._
-import whisk.core.entity.ExecManifest.RuntimeManifest
-import whisk.core.entity.ExecManifest.ImageName
+import whisk.core.entity.ExecManifest.{ImageName, PrewarmingConfig, RuntimeManifest}
 import whisk.core.entity.size._
 import whisk.core.connector.MessageFeed
 
@@ -239,7 +238,7 @@ class ContainerPoolTests
     val feed = TestProbe()
 
     val pool =
-      system.actorOf(ContainerPool.props(factory, 0, 0, feed.ref, Some(PrewarmingConfig(1, exec, memoryLimit))))
+      system.actorOf(ContainerPool.props(factory, 0, 0, feed.ref, Set(PrewarmingConfig(1, exec, memoryLimit))))
     containers(0).expectMsg(Start(exec, memoryLimit))
   }
 
@@ -248,7 +247,7 @@ class ContainerPoolTests
     val feed = TestProbe()
 
     val pool =
-      system.actorOf(ContainerPool.props(factory, 1, 1, feed.ref, Some(PrewarmingConfig(1, exec, memoryLimit))))
+      system.actorOf(ContainerPool.props(factory, 1, 1, feed.ref, Set(PrewarmingConfig(1, exec, memoryLimit))))
     containers(0).expectMsg(Start(exec, memoryLimit))
     containers(0).send(pool, NeedWork(preWarmedData(exec.kind)))
     pool ! runMessage
@@ -262,7 +261,7 @@ class ContainerPoolTests
     val alternativeExec = CodeExecAsString(RuntimeManifest("anotherKind", ImageName("testImage")), "testCode", None)
 
     val pool = system.actorOf(
-      ContainerPool.props(factory, 1, 1, feed.ref, Some(PrewarmingConfig(1, alternativeExec, memoryLimit))))
+      ContainerPool.props(factory, 1, 1, feed.ref, Set(PrewarmingConfig(1, alternativeExec, memoryLimit))))
     containers(0).expectMsg(Start(alternativeExec, memoryLimit)) // container0 was prewarmed
     containers(0).send(pool, NeedWork(preWarmedData(alternativeExec.kind)))
     pool ! runMessage
@@ -276,7 +275,7 @@ class ContainerPoolTests
     val alternativeLimit = 128.MB
 
     val pool =
-      system.actorOf(ContainerPool.props(factory, 1, 1, feed.ref, Some(PrewarmingConfig(1, exec, alternativeLimit))))
+      system.actorOf(ContainerPool.props(factory, 1, 1, feed.ref, Set(PrewarmingConfig(1, exec, alternativeLimit))))
     containers(0).expectMsg(Start(exec, alternativeLimit)) // container0 was prewarmed
     containers(0).send(pool, NeedWork(preWarmedData(exec.kind, alternativeLimit)))
     pool ! runMessage

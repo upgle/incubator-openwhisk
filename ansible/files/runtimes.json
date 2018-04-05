@@ -14,7 +14,8 @@
                 "image": {
                     "name": "nodejs6action"
                 },
-                "deprecated": false
+                "deprecated": false,
+                "stemCells": [{"memory": 256, "count": 2}]
             },
             {
                 "kind": "nodejs:8",
