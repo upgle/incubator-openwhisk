@@ -23,8 +23,9 @@ import org.scalatest.{FlatSpec, Matchers}
 import org.scalatest.junit.JUnitRunner
 import spray.json.DefaultJsonProtocol._
 import spray.json._
-import whisk.core.entity.ExecManifest
+import whisk.core.entity.{CodeExecAsString, ExecManifest}
 import whisk.core.entity.ExecManifest._
+import whisk.core.entity.size._
 
 import scala.util.Success
 
@@ -133,6 +134,42 @@ class ExecManifestTests extends FlatSpec with WskActorSystem with StreamLogging 
 
     runtimes.skipDockerPull(ImageName("???", Some("pre"), Some("test"))) shouldBe true
     runtimes.skipDockerPull(ImageName("???", Some("bbb"), Some("test"))) shouldBe false
+  }
+ 
+  it should "read valid prewarming configs" in {
+    val i1 = RuntimeManifest("i1", ImageName("???"), default = Some(true))
+    val i2 = RuntimeManifest("i2", ImageName("???"), stemCells = Some(List(
+                              Map("count" -> 2, "memory" -> 256),
+                              Map("count" -> 1, "memory" -> 512))
+                            ))
+    val j1 = RuntimeManifest("j1", ImageName("???"), stemCells = Some(List(
+                              Map("count" -> 1, "memory" -> 256),
+                              Map("count" -> 1, "memory" -> 512))
+                            ))
+
+    val mf = JsObject("runtimes" -> JsObject("is" -> Set(i1, i2).toJson, "js" -> Set(j1).toJson))
+    val runtimes = ExecManifest.runtimes(mf, RuntimeManifestConfig()).get
+    runtimes.prewarmingConfigs shouldBe {
+      Set(
+        PrewarmingConfig(2, CodeExecAsString(i2, "", None), 256.MB),
+        PrewarmingConfig(1, CodeExecAsString(i2, "", None), 512.MB),
+        PrewarmingConfig(1, CodeExecAsString(j1, "", None), 256.MB),
+        PrewarmingConfig(1, CodeExecAsString(j1, "", None), 512.MB)
+      )
+    }
+  }
+
+  it should "skip invalid prewarming configs" in {
+    val i1 = RuntimeManifest("i1", ImageName("???"), default = Some(true))
+    val i2 = RuntimeManifest("i2", ImageName("???"), stemCells = Some(List(
+      Map("count" -> 2, "n_memory" -> 256),
+      Map("n_count" -> 1, "memory" -> 512))
+    ))
+    val j1 = RuntimeManifest("j1", ImageName("???"))
+
+    val mf = JsObject("runtimes" -> JsObject("is" -> Set(i1, i2).toJson, "js" -> Set(j1).toJson))
+    val runtimes = ExecManifest.runtimes(mf, RuntimeManifestConfig()).get
+    runtimes.prewarmingConfigs shouldBe Set.empty[PrewarmingConfig]
   }
 
   it should "reject runtimes with multiple defaults" in {
