@@ -84,17 +84,22 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     val actionName = r.action.name.name
     val activationId = r.msg.activationId.toString
 
+    val FQN = r.action.fullyQualifiedName(false)
+    if (FQN.namespace.name == "whisk.system" && FQN.fullPath.segments > 2) {
+      MetricEmitter.emitCounterMetric(LoggingMarkers.INVOKER_SHAREDPACKAGE(FQN.fullPath.asString))
+    }
+
     r.msg.transid.mark(
       this,
-      LoggingMarkers.INVOKER_CONTAINER_START(containerState),
+      LoggingMarkers.INVOKER_CONTAINER_START(containerState, r.action.limits.memory.megabytes.toString, r.action.exec.kind),
       s"containerStart containerState: $containerState action: $actionName namespace: $namespaceName activationId: $activationId",
       akka.event.Logging.InfoLevel)
   }
 
   def logContainerPool(): Unit = {
-    MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "containerPool", "count", Some("free"), Map("state" -> "free")), freePool.size)
-    MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "containerPool", "count", Some("busy"), Map("state" -> "busy")), busyPool.size)
-    MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "containerPool", "count", Some("prewarmed"), Map("state" -> "prewarmed")), prewarmedPool.size)
+    MetricEmitter.emitHistogramMetric(LoggingMarkers.INVOKER_CONTAINERPOOL("free"), freePool.size)
+    MetricEmitter.emitHistogramMetric(LoggingMarkers.INVOKER_CONTAINERPOOL("busy"), busyPool.size)
+    MetricEmitter.emitHistogramMetric(LoggingMarkers.INVOKER_CONTAINERPOOL("prewarmed"), prewarmedPool.size)
   }
 
   def receive: Receive = {
@@ -178,7 +183,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               // Add this request to the buffer, as it is not there yet.
               runBuffer = runBuffer.enqueue(r)
             }
-            MetricEmitter.emitCounterMetric(LogMarkerToken("invoker", "runRetry", "count"))
+            MetricEmitter.emitCounterMetric(LoggingMarkers.INVOKER_RETRY)
             // As this request is the first one in the buffer, try again to execute it.
             self ! Run(r.action, r.msg, retryLogDeadline)
         }

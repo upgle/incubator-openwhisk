@@ -32,7 +32,7 @@ import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport.sprayJsonMarsha
 import akka.http.scaladsl.unmarshalling._
 import spray.json._
 import spray.json.DefaultJsonProtocol._
-import whisk.common.TransactionId
+import whisk.common.{LoggingMarkers, MetricEmitter, TransactionId}
 import whisk.core.WhiskConfig
 import whisk.core.controller.RestApiCommons.{ListLimit, ListSkip}
 import whisk.core.controller.actions.PostActionActivation
@@ -306,6 +306,7 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
    * - 500 Internal Server Error
    */
   override def remove(user: Identity, entityName: FullyQualifiedEntityName)(implicit transid: TransactionId) = {
+    MetricEmitter.emitCounterMetric(LoggingMarkers.CONTROLLER_ACTION_DELETE)
     deleteEntity(WhiskAction, entityStore, entityName.toDocId, (a: WhiskAction) => Future.successful({}))
   }
 
@@ -402,6 +403,8 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
         Parameters("_actions", JsArray(seq.components map { _.qualifiedNameWithLeadingSlash.toJson }))
       case _ => content.parameters getOrElse Parameters()
     }
+
+    MetricEmitter.emitCounterMetric(LoggingMarkers.CONTROLLER_ACTION_CREATE(limits.memory.megabytes.toString, exec.kind))
 
     WhiskAction(
       entityName.path,
@@ -516,6 +519,8 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
     }
 
     val exec = content.exec getOrElse action.exec
+    
+    MetricEmitter.emitCounterMetric(LoggingMarkers.CONTROLLER_ACTION_UPDATE(limits.memory.megabytes.toString, exec.kind))
 
     WhiskAction(
       action.namespace,
