@@ -252,6 +252,17 @@ object LoggingMarkers {
   private val kafka = "kafka"
   private val loadbalancer = "loadbalancer"
 
+
+  /*
+   * Lambda Log Marker
+   */
+  def CONTROLLER_ACTION_CREATE(memory: String, kind: String) = LogMarkerToken(controller, "actionCreate", count, None, Map("memory" -> memory, "kind" -> kind))
+  def CONTROLLER_ACTION_UPDATE(memory: String, kind: String) = LogMarkerToken(controller, "actionUpdate", count, None, Map("memory" -> memory, "kind" -> kind))
+  def CONTROLLER_ACTION_DELETE = LogMarkerToken(controller, "actionDelete", count)
+  def INVOKER_SHAREDPACKAGE(path: String) = LogMarkerToken(invoker, "sharedPackage", count, None, Map("path" -> path))
+  def INVOKER_CONTAINERPOOL(state: String) = LogMarkerToken(invoker, "containerPool", count, Some(state), Map("state" -> state))
+  def INVOKER_RETRY = LogMarkerToken(invoker, "runRetry", count)
+
   /*
    * Controller related markers
    */
@@ -294,8 +305,8 @@ object LoggingMarkers {
   def INVOKER_DOCKER_CMD(cmd: String) = LogMarkerToken(invoker, "docker", start, Some(cmd), Map("cmd" -> cmd))
   def INVOKER_RUNC_CMD(cmd: String) = LogMarkerToken(invoker, "runc", start, Some(cmd), Map("cmd" -> cmd))
   def INVOKER_KUBECTL_CMD(cmd: String) = LogMarkerToken(invoker, "kubectl", start, Some(cmd), Map("cmd" -> cmd))
-  def INVOKER_CONTAINER_START(containerState: String) =
-    LogMarkerToken(invoker, "containerStart", count, Some(containerState), Map("containerState" -> containerState))
+  def INVOKER_CONTAINER_START(containerState: String, memory: String, kind: String) =
+    LogMarkerToken(invoker, "containerStart", count, Some(containerState), Map("containerState" -> containerState, "memory" -> memory, "kind" -> kind))
 
   // Kafka related markers
   def KAFKA_QUEUE(topic: String) = LogMarkerToken(kafka, topic, count)
