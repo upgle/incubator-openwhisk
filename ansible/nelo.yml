@@ -1,0 +1,6 @@
+---
+# This playbook just generate logstash.conf on controller/invoker/nginx/couchdb/kafka/zookeeper nodes
+
+- hosts: nelo
+  roles:
+  - nelo
