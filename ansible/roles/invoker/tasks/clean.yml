@@ -23,6 +23,9 @@
     url: "http://{{ ansible_host }}:{{ invoker.port + groups['invokers'].index(inventory_hostname) }}/disable"
     method: GET
     status_code: 200
+    user: "{{ invoker.username }}"
+    password: "{{ invoker.password }}"
+    force_basic_auth: yes
   ignore_errors: True
   when: invokerDeployed.stdout != "0"
 
