@@ -13,6 +13,9 @@
     client_cert: "{{ invoker.confdir }}/invoker{{ groups['invokers'].index(inventory_hostname) }}/{{ invoker.ssl.cert }}"
     method: GET
     status_code: 200
+    user: "{{ invoker.username }}"
+    password: "{{ invoker.password }}"
+    force_basic_auth: yes
   ignore_errors: True
   when: invokerDeployed.stdout != "0"
 

@@ -31,6 +31,8 @@ class ZeroDownTimeDeploymentTests
 
   val controllerProtocol = loadConfigOrThrow[String]("whisk.controller.protocol")
   val controllerAddress = WhiskProperties.getBaseControllerAddress
+  val invokerUsername = WhiskProperties.getInvokerUsername
+  val invokerPassword = WhiskProperties.getInvokerPassword
   val allInvokerStatusUrl = s"$controllerProtocol://$controllerAddress/invokers"
 
 
@@ -52,7 +54,7 @@ class ZeroDownTimeDeploymentTests
 
   it should "disable invoker and enable invoker" in {
     val invokerAddress = WhiskProperties.getBaseInvokerAddress()
-    val disableUrl = s"http://$invokerAddress/disable"
+    val disableUrl = s"http://$invokerUsername:$invokerPassword@$invokerAddress/disable"
     val response = RestAssured.given().get(disableUrl)
     response.statusCode shouldBe 200
     // at most 15 seconds later, the invoker0's status will be down
@@ -63,7 +65,7 @@ class ZeroDownTimeDeploymentTests
       3, Some(5000.milliseconds)
     )
 
-    val enableUrl = s"http://$invokerAddress/enable"
+    val enableUrl = s"http://$invokerUsername:$invokerPassword@$invokerAddress/enable"
     val response2 = RestAssured.given().get(enableUrl)
     response2.statusCode shouldBe 200
     retry(

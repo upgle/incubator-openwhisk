@@ -288,6 +288,14 @@ public class WhiskProperties {
         return getInvokerHosts()[0] + ":" + whiskProperties.getProperty("invoker.hosts.basePort");
     }
 
+    public static String getInvokerUsername() {
+        return whiskProperties.getProperty("invoker.username");
+    }
+
+    public static String getInvokerPassword() {
+        return whiskProperties.getProperty("invoker.password");
+    }
+
     public static int getMaxActionInvokesPerMinute() {
         String valStr = whiskProperties.getProperty("limits.actions.invokes.perMinute");
         return Integer.parseInt(valStr);
