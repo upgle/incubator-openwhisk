@@ -1,0 +1,13 @@
+---
+# Remove logstash
+- name: remove logstash
+  yum:
+    name: logstash
+    state: absent
+  become: true
+
+- name: remove logstash conf directory
+  file:
+    path: "{{ nelo.logstashConfdir }}"
+    state: absent
+  become: true

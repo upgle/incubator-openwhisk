@@ -260,9 +260,6 @@
         {{ docker_registry }}{{ docker.image.prefix }}/invoker:{{ docker.image.tag }}
         /bin/sh -c "exec /init.sh {{ groups['invokers'].index(inventory_hostname) }} >> /logs/invoker{{ groups['invokers'].index(inventory_hostname) }}_logs.log 2>&1"
 
-- name: make sure invoker log has permission to create hardlink to point it
-  shell: docker exec -t invoker{{ groups['invokers'].index(inventory_hostname) }} chmod 777 /logs/invoker{{ groups['invokers'].index(inventory_hostname) }}_logs.log
-
 # todo: re-enable docker_container module once https://github.com/ansible/ansible-modules-core/issues/5054 is resolved
 
 - name: wait until Invoker is up and running
