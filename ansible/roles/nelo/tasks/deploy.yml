@@ -1,0 +1,62 @@
+---
+# This role will install logstash and generate logstash.conf
+- name: Judge logstash whether already installed
+  shell: echo $(rpm -qa|grep logstash)
+  register: logstashInstall
+
+- name: copy over install-logstash script to target hosts
+  copy: src={{playbook_dir}}/roles/nelo/files/install-logstash.sh dest=/tmp/install-logstash.sh mode=755
+  when: not logstashInstall.stdout | search("logstash")
+
+- name: Install logstash on target nodes
+  shell: "/tmp/install-logstash.sh"
+  become: true
+  when: not logstashInstall.stdout | search("logstash")
+
+- name: Get couchdb container id
+  shell: echo $(docker ps --no-trunc -aqf "name=couchdb")
+  register: couchdbContainerId
+
+- name: Get kafka container id
+  shell: echo $(docker ps --no-trunc -aqf "name=kafka")
+  register: kafkaContainerId
+
+- name: Get zookeeper container id
+  shell: echo $(docker ps --no-trunc -aqf "name=zookeeper")
+  register: zookeeperContainerId
+
+- name: Judge current node is whether couchdb/kafka/zookeeper node
+  set_fact:
+    is_db_node: "true"
+  when: couchdbContainerId.stdout != '' or kafkaContainerId.stdout != '' or zookeeperContainerId.stdout != ''
+
+- name: copy logrotate configuration for controller/invoker/nginx nodes
+  template:
+    src: logrotate.conf.j2
+    dest: "/etc/logrotate.d/lambda"
+    mode: 0644
+  become: true
+  when: is_db_node is undefined
+
+- name: get deployed components on current node
+  shell: echo $(ls -l {{ whisk_logs_dir }} | awk -vORS=, '{if(NR!=1) print $9}'| sed 's/,$/\n/')
+  register: deployedComponents
+  when: is_db_node is undefined
+
+- name: copy logstash configuration for controller/invoker/nginx nodes
+  template:
+    src: logstash.conf.j2
+    dest: "{{ nelo.logstashConfdir }}/conf.d/logstash.conf"
+  become: true
+  when: is_db_node is undefined
+
+- name: copy logstash configuration for couchdb/kafka/zookeeper nodes
+  template:
+    src: logstash.db.conf.j2
+    dest: "{{ nelo.logstashConfdir }}/conf.d/logstash.conf"
+  become: true
+  when: is_db_node is defined and is_db_node == true
+
+- name: Restart logstash
+  shell: systemctl restart logstash.service
+  become: true
