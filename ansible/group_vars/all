@@ -363,13 +363,8 @@ metrics:
 user_events: "{{ user_events_enabled | default(false) }}"
 
 # Nelo relative configuration
-neloagent:
-  confdir: "{{ config_root_dir }}/neloagent"
+nelo:
+  logstashConfdir: "/etc/logstash"
   project_name: "{{ nelo_project_name | default('lambda-test') }}"
   project_version: "{{ nelo_project_version | default('1.0.0') }}"
-  log_level: "{{ nelo_log_level | default('debug') }}"
-  interface: "{{ nelo_interface | default('eth0') }}"
-  sink_server_ip: "{{ nelo_sink_server_ip | default('nelo2-col.navercorp.com') }}"
-  sink_server_port: "{{ nelo_sink_server_port | default(10006) }}"
-  master_server_ip: "{{ nelo_master_server_ip | default('nelo2-zk.navercorp.com') }}"
-  master_server_port: "{{ nelo_master_server_port | default(10013) }}"
+  serverUrl: "{{ nelo_server_url | default('http://nelo2-col.navercorp.com/_store') }}"
