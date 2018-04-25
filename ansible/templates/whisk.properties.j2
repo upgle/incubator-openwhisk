@@ -48,6 +48,9 @@ router.host={{ groups["edge"]|first }}
 zookeeper.hosts={{ zookeeper_connect_string }}
 invoker.hosts={{ groups["invokers"] | map('extract', hostvars, 'ansible_host') | list | join(",") }}
 
+invoker.username={{ invoker.username }}
+invoker.password={{ invoker.password }}
+
 edge.host.apiport=443
 kafkaras.host.port={{ kafka.ras.port }}
 redis.host.port={{ redis.port }}
