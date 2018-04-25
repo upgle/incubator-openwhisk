@@ -334,9 +334,6 @@
       "exec /init.sh {{ controller_index }}
       >> /logs/{{ controller_name }}_logs.log 2>&1"
 
-- name: make sure controller log has permission to create hardlink to point it
-  shell: docker exec -t {{ controller_name }} chmod 777 /logs/{{ controller_name }}_logs.log
-
 - name: wait until the Controller in this host is up and running
   uri:
     url:
