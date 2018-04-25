@@ -1,0 +1,12 @@
+{{ whisk_logs_dir }}/*/*.log {
+    su root root
+    daily
+    rotate 6
+    copytruncate
+    compress
+    delaycompress
+    notifempty
+    missingok
+    minsize 30M
+    maxsize 100M
+}

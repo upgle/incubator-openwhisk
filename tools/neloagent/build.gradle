@@ -1,2 +1,0 @@
-ext.dockerImageName = "neloagent"
-apply from: '../../gradle/docker.gradle'
