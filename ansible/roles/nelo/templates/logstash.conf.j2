@@ -1,0 +1,47 @@
+input {
+file {
+  path => "/var/log/messages"
+  add_field => { "logType" => "docker" }
+}
+{% if 'controller' in deployedComponents.stdout %}
+file {
+  path => "{{ whisk_logs_dir }}/controller*/controller*_logs.log"
+  add_field => { "logType" => "controller" }
+}
+{% endif %}
+{% if 'invoker' in deployedComponents.stdout %}
+file {
+  path => "{{ whisk_logs_dir }}/invoker*/invoker*_logs.log"
+  add_field => { "logType" => "invoker" }
+}
+{% endif %}
+{% if 'nginx' in deployedComponents.stdout %}
+file {
+  path => "{{ whisk_logs_dir }}/nginx/nginx_error.log"
+  add_field => { "logType" => "nginx" }
+}
+{% endif %}
+}
+
+filter {
+if ([path] =~ "messages" and [message] !~ "dockerd") {
+   drop { }
+}
+mutate {
+  add_field => {
+    "projectName" => "{{ nelo.project_name }}"
+    "projectVersion" => "{{ nelo.project_version }}"
+    "logSource" => "logFile"
+  }
+ remove_field => ["path","@timestamp","@version"]
+}
+}
+
+output {
+http {
+    http_method => "post"
+    url => "{{ nelo.serverUrl }}"
+    format => "json"
+    automatic_retries => 2
+}
+}

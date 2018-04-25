@@ -1,9 +1,0 @@
----
-# Remove neloagent containers.
-
-- name: remove neloagent
-  docker_container:
-    name: neloagent
-    image: "{{ docker_registry }}{{ docker_image_prefix }}/neloagent:{{ docker_image_tag }}"
-    state: absent
-  ignore_errors: True
