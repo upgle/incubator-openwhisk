@@ -106,6 +106,16 @@
                     "name": "action-php-v7.1"
                 }
             }
+        ],
+        "shell": [
+            {
+                "kind": "shell",
+                "default": true,
+                "deprecated": false,
+                "image": {
+                    "name": "action-shell-centos7"
+                }
+            }
         ]
     },
     "blackboxes": [
