@@ -20,6 +20,8 @@ include 'common:scala'
 include 'core:controller'
 include 'core:invoker'
 
+include 'actionRuntimes:shellAction'
+
 include 'tests'
 include 'tests:performance:gatling_tests'
 
