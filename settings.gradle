@@ -11,6 +11,7 @@ include 'actionRuntimes:swift3.1.1Action'
 include 'actionRuntimes:swift4.1Action'
 include 'actionRuntimes:javaAction'
 include 'actionRuntimes:php7.1Action'
+include 'actionRuntimes:shellAction'
 include 'sdk:docker'
 
 include 'tests'

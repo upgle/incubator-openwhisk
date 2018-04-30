@@ -1,0 +1,2 @@
+ext.dockerImageName = 'action-shell-centos7'
+apply from: '../../gradle/docker.gradle'
