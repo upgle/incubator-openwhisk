@@ -23,7 +23,7 @@ import akka.actor.ActorSystem
 import akka.event.Logging.InfoLevel
 import spray.json._
 import whisk.common.tracing.WhiskTracerProvider
-import whisk.common.{Logging, LoggingMarkers, TransactionId, UserEvents}
+import whisk.common.{Logging, LoggingMarkers, MetricEmitter, TransactionId, UserEvents}
 import whisk.core.connector.{ActivationMessage, EventMessage, MessagingProvider}
 import whisk.core.controller.WhiskServices
 import whisk.core.database.{ActivationStore, NoDocumentException, UserContext}
@@ -180,6 +180,8 @@ protected[actions] trait PrimitiveActions {
       volatile = volatile)
 
     val postedFuture = loadBalancer.publish(action, message)
+
+    MetricEmitter.emitCounterMetric(LoggingMarkers.CONTROLLER_ACTION_INVOKE(action.limits.memory.megabytes.toString, action.exec.kind))
 
     postedFuture andThen {
       case Success(_) => transid.finished(this, startLoadbalancer)
