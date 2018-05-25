@@ -22,7 +22,7 @@ import java.time.{Clock, Instant}
 import akka.actor.ActorSystem
 import akka.event.Logging.InfoLevel
 import spray.json._
-import whisk.common.{Logging, LoggingMarkers, TransactionId}
+import whisk.common.{Logging, LoggingMarkers, MetricEmitter, TransactionId}
 import whisk.core.connector.ActivationMessage
 import whisk.core.controller.WhiskServices
 import whisk.core.database.NoDocumentException
@@ -169,6 +169,8 @@ protected[actions] trait PrimitiveActions {
     val startLoadbalancer =
       transid.started(this, LoggingMarkers.CONTROLLER_LOADBALANCER, s"action activation id: ${message.activationId}")
     val postedFuture = loadBalancer.publish(action, message)
+
+    MetricEmitter.emitCounterMetric(LoggingMarkers.CONTROLLER_ACTION_INVOKE(action.limits.memory.megabytes.toString, action.exec.kind))
 
     postedFuture.flatMap { activeAckResponse =>
       // successfully posted activation request to the message bus

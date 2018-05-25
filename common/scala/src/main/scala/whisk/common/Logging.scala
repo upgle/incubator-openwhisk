@@ -256,6 +256,7 @@ object LoggingMarkers {
   /*
    * Lambda Log Marker
    */
+  def CONTROLLER_ACTION_INVOKE(memory: String, kind: String) = LogMarkerToken(controller, "actionInvoke", count, None, Map("memory" -> memory, "kind" -> kind))
   def CONTROLLER_ACTION_CREATE(memory: String, kind: String) = LogMarkerToken(controller, "actionCreate", count, None, Map("memory" -> memory, "kind" -> kind))
   def CONTROLLER_ACTION_UPDATE(memory: String, kind: String) = LogMarkerToken(controller, "actionUpdate", count, None, Map("memory" -> memory, "kind" -> kind))
   def CONTROLLER_ACTION_DELETE = LogMarkerToken(controller, "actionDelete", count)
