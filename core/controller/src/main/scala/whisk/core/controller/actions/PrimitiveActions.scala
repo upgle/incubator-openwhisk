@@ -22,7 +22,7 @@ import java.time.{Clock, Instant}
 import akka.actor.ActorSystem
 import akka.event.Logging.InfoLevel
 import spray.json._
-import whisk.common.{Logging, LoggingMarkers, TransactionId}
+import whisk.common.{Logging, LoggingMarkers, MetricEmitter, TransactionId}
 import whisk.common.tracing.WhiskTracerProvider
 import whisk.core.connector.ActivationMessage
 import whisk.core.controller.WhiskServices
@@ -174,6 +174,8 @@ protected[actions] trait PrimitiveActions {
       volatile = volatile)
 
     val postedFuture = loadBalancer.publish(action, message)
+
+    MetricEmitter.emitCounterMetric(LoggingMarkers.CONTROLLER_ACTION_INVOKE(action.limits.memory.megabytes.toString, action.exec.kind))
 
     postedFuture.flatMap { activeAckResponse =>
       // successfully posted activation request to the message bus
