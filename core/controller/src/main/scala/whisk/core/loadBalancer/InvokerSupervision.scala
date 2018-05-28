@@ -149,7 +149,7 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
   def logStatus(): Unit = {
     monitor.foreach(_ ! CurrentInvokerPoolState(status))
     val pretty = status.map(i => s"${i.id.toInt} -> ${i.status}")
-    logging.info(this, s"invoker status changed to ${pretty.mkString(", ")}")
+    logging.warn(this, s"invoker status changed to ${pretty.mkString(", ")}")
   }
 
   /** Receive Ping messages from invokers. */
