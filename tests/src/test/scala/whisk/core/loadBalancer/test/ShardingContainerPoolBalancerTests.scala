@@ -127,7 +127,9 @@ class ShardingContainerPoolBalancerTests extends FlatSpec with Matchers with Str
     state.invokerSlots.head.availablePermits shouldBe (memory - memoryPerSlot).toMB
 
     state.updateCluster(2)
-    state.invokerSlots.head.availablePermits shouldBe memory.toMB / 2 // state reset + divided by 2
+
+    // the acquired shared is kept as memoryPerSlot.toMB.toInt, so the avilablePermits should be the new threshold - memoryPerSlot.toMB.toInt
+    state.invokerSlots.head.availablePermits shouldBe memory.toMB / 2 - memoryPerSlot.toMB.toInt // state reset + divided by 2
   }
 
   it should "fallback to a size of 1 (alone) if cluster size is < 1" in {
@@ -161,6 +163,18 @@ class ShardingContainerPoolBalancerTests extends FlatSpec with Matchers with Str
     state.updateCluster(20)
 
     state.invokerSlots.head.availablePermits shouldBe MemoryLimit.minMemory.toMB
+  }
+
+  it should "limit the max value of available permits to the currentInvokerThreshold" in {
+    val slots = 10
+    val memoryPerSlot = MemoryLimit.minMemory
+    val memory = memoryPerSlot * slots
+    val state = ShardingContainerPoolBalancerState()(lbConfig(0.5, memory))
+    state.updateInvokers(IndexedSeq(healthy(0)))
+
+    state.invokerSlots.head.release()
+    state.invokerSlots.head.release()
+    state.invokerSlots.head.availablePermits shouldBe memory.toMB
   }
 
   behavior of "schedule"
