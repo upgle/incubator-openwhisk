@@ -69,6 +69,12 @@ trait LoadBalancer {
   /** Gets the number of in-flight activations for a specific user. */
   def activeActivationsFor(namespace: UUID): Future[Int]
 
+  /** Gets the number of in-flight activations for a specific controller. */
+  def activeActivationsByController(controller: String): Future[Int]
+
+  /** Gets the number of in-flight activations for a specific invoker. */
+  def activeActivationsByInvoker(invoker: String): Future[Int]
+
   /** Gets the number of in-flight activations in the system. */
   def totalActiveActivations: Future[Int]
 

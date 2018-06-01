@@ -13,7 +13,7 @@ import whisk.spi.SpiLoader
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
-import scala.util.Failure
+import scala.util.{Failure, Success}
 
 /**
   * Implements web server to handle certain REST API calls.
@@ -32,9 +32,14 @@ class InvokerServer(implicit val ec: ExecutionContext, implicit val actorSystem:
             if(username == invokerUsername && password == invokerPassword){
               Invoker.messageProducer match {
                 case Some(producer) => {
-                  // Through negative number of invoker to pass unhealth message
-                  producer.send("health", PingMessage(InstanceId(-1 - Invoker.currentInstance.get.instance, Invoker.currentInstance.get.name)))
-                  producer.close();
+                  // Through negative number of invoker to pass unhealthy message
+                  producer.send("health", PingMessage(InstanceId(-1 - Invoker.currentInstance.get.instance, Invoker.currentInstance.get.name)), 3).andThen {
+                    case Success(_) =>
+                      producer.close();
+                      logger.info(this, "send unhealthy message successfully")
+                    case Failure(_) =>
+                      logger.info(this, "failed to send unhealthy message")
+                  }
                   Invoker.messageProducer=None;
                   complete("Success disable invoker");
                 }

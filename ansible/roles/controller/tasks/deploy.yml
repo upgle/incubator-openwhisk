@@ -250,6 +250,7 @@
   register: nginxExist
   delegate_to: "{{ item }}"
   with_items: "{{ groups['edge'][0] }}"
+  when: zerodowntimeDeployment.enabled == true
 
 # If controller's ansible task failed in middle, so nginx.conf may be wrong.
 # So need to make sure nginx's configuration is right
@@ -259,23 +260,7 @@
     dest: "{{ nginx.confdir }}/nginx.conf"
   delegate_to: "{{ item }}"
   with_items: "{{ groups['edge'] }}"
-  when: nginxExist.results[0].stdout != "0"
-
-- name: copy controller ssl.cert for authentication on nginx
-  copy:
-    src: "{{ openwhisk_home }}/ansible/roles/controller/files/{{ controller.ssl.cert }}"
-    dest: "{{ nginx.confdir }}"
-  delegate_to: "{{ item }}"
-  with_items: "{{ groups['edge'] }}"
-  when: controller.protocol == 'https' and nginxExist.results[0].stdout != "0"
-
-- name: copy controller ssl.key for authentication on nginx
-  copy:
-    src: "{{ openwhisk_home }}/ansible/roles/controller/files/{{ controller.ssl.key }}"
-    dest: "{{ nginx.confdir }}"
-  delegate_to: "{{ item }}"
-  with_items: "{{ groups['edge'] }}"
-  when: controller.protocol == 'https' and nginxExist.results[0].stdout != "0"
+  when: zerodowntimeDeployment.enabled == true and nginxExist.results[0].stdout != "0"
 
 - name: Remove the controller from nginx's upstream configuration
   shell:
@@ -283,10 +268,34 @@
   delegate_to: "{{ item }}"
   with_items: "{{ groups['edge'] }}"
   ignore_errors: True
-  when: nginxExist.results[0].stdout != "0"
+  when: zerodowntimeDeployment.enabled == true and nginxExist.results[0].stdout != "0"
 
-- name: Sleep some time to wait controller to execute all non-finished actions
-  shell: sleep {{ controller.notFinishedActionTime }}
+- name: Judge controller whether deployed
+  shell: echo $(docker ps | grep {{ controller_name }} | wc -l)
+  register: controllerDeployed
+  when: zerodowntimeDeployment.enabled == true
+
+- name: Wait 5s to make sure all triggers are fired
+  shell: sleep 5s
+  when: zerodowntimeDeployment.enabled == true and controllerDeployed.stdout != "0"
+
+- name: wait until {{ controller_name }} executed all non-finished actions using apicall solution
+  uri:
+    url: "{{ controller.protocol }}://{{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/get-running-action-number?controller={{ controller_index }}"
+    validate_certs: no
+    client_key: "{{ controller.confdir }}/controller{{ groups['controllers'].index(inventory_hostname) }}/{{ controller.ssl.key }}"
+    client_cert: "{{ controller.confdir }}/controller{{ groups['controllers'].index(inventory_hostname) }}/{{ controller.ssl.cert }}"
+    return_content: yes
+  register: result
+  until: result.content == '0'
+  retries: 60
+  delay: 5
+  when: zerodowntimeDeployment.enabled == true and controllerDeployed.stdout != "0" and zerodowntimeDeployment.solution == 'apicall'
+  ignore_errors: True
+
+- name: Sleep some time to wait controller to execute all non-finished actions using sleep solution
+  shell: sleep 120s
+  when: zerodowntimeDeployment.enabled == true and controllerDeployed.stdout != "0" and zerodowntimeDeployment.solution == 'sleep'
 
 - name: (re)start controller
   docker_container:
@@ -323,10 +332,19 @@
 
 # VIM: let b:syntastic_yaml_yamllint_args="-c '".expand('%:p:h')."../../../yamllint.yml'"
 
-# After redeploy controller, should wait about 30s to make sure all invokers report their own health status to controller through kafka
-- name: Sleep some time to make sure all invokers report their own health status to controller
-  shell: sleep {{ controller.initTime }}
-  when: nginxExist.results[0].stdout != "0"
+- name: Wait all invokers in {{ controller_name }} become up
+  uri:
+    url: "{{ controller.protocol }}://{{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/invokers"
+    validate_certs: no
+    client_key: "{{ controller.confdir }}/controller{{ groups['controllers'].index(inventory_hostname) }}/{{ controller.ssl.key }}"
+    client_cert: "{{ controller.confdir }}/controller{{ groups['controllers'].index(inventory_hostname) }}/{{ controller.ssl.cert }}"
+    return_content: yes
+  register: invokerStatus
+  until: invokerStatus.json|length >= 1 and "unhealthy" not in invokerStatus.content
+  retries: 14
+  delay: 5
+  when: zerodowntimeDeployment.enabled == true
+  ignore_errors: True
 
 # When all invokers report their status to controller, add the controller instance to nginx
 - name: Add the controller to nginx's upstream configuration
@@ -335,7 +353,7 @@
   delegate_to: "{{ item }}"
   with_items: "{{ groups['edge'] }}"
   ignore_errors: True
-  when: nginxExist.results[0].stdout != "0"
+  when: zerodowntimeDeployment.enabled == true and nginxExist.results[0].stdout != "0"
 
 - name: create controller jmx.yml
   template:

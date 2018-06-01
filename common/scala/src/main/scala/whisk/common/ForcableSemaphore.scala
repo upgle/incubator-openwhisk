@@ -34,7 +34,7 @@ import scala.annotation.tailrec
  *
  * @param maxAllowed maximum number of permits given away by `tryAcquire`
  */
-class ForcableSemaphore(maxAllowed: Int) {
+class ForcableSemaphore(private var maxAllowed: Int) {
   class Sync extends AbstractQueuedSynchronizer {
     setState(maxAllowed)
 
@@ -48,7 +48,10 @@ class ForcableSemaphore(maxAllowed: Int) {
       if (next < current) { // integer overflow
         throw new Error("Maximum permit count exceeded, permit variable overflowed")
       }
-      if (compareAndSetState(current, next)) {
+      if (next > maxAllowed) {
+        // make sure the availablePermits not exceed the maxAllowed value
+        false
+      } else if (compareAndSetState(current, next)) {
         true
       } else {
         tryReleaseShared(releases)
@@ -80,6 +83,21 @@ class ForcableSemaphore(maxAllowed: Int) {
       val remaining = available - acquires
       if (!compareAndSetState(available, remaining)) {
         forceAquireShared(acquires)
+      }
+    }
+
+    /**
+     * when the cluster of controllers is changed, the new state should be set to
+     * newMaxAllowed - (oldMaxAllowed - oldState)
+     * e.g. before change, the maxAllowed = 10, and state = 8, which means there are 2 acquired shared, after change to
+     * the newMaxAllowed = 5, the acquired shared cannot be changed manually, we need set the new state to 5 - (10 - 8)
+     */
+    @tailrec
+    final def forceChangeState(newMaxAllowed: Int): Unit = {
+      val available = getState
+      val newState = newMaxAllowed - (maxAllowed - available)
+      if (!compareAndSetState(available, newState)) {
+        forceChangeState(newMaxAllowed)
       }
     }
   }
@@ -121,4 +139,11 @@ class ForcableSemaphore(maxAllowed: Int) {
 
   /** Returns the number of currently available permits. Possibly negative. */
   def availablePermits: Int = sync.permits
+
+  /** Set the new maxAllowed value. */
+  def setMaxAllowed(newMaxAllowed: Int): Unit = {
+    require(newMaxAllowed > 0, "maxAllowed cannot be negative")
+    sync.forceChangeState(newMaxAllowed)
+    maxAllowed = newMaxAllowed
+  }
 }
