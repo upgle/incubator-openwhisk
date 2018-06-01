@@ -62,6 +62,7 @@
 
 - name: Sleep some time in order to switch traffic to alive node
   shell: sleep {{ nginx.sleeptime }}
+  when: zerodowntimeDeployment.enabled == true
 
 - name: (re)start nginx
   docker_container:
@@ -89,3 +90,4 @@
 
 - name: Sleep some time in order to let lb find this nginx node
   shell: sleep {{ nginx.sleeptime }}
+  when: zerodowntimeDeployment.enabled == true

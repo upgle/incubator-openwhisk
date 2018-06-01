@@ -143,7 +143,7 @@ class InvokerPool(childFactory: (ActorRefFactory, InstanceId) => ActorRef,
           // Set the invoker status to UnHealthy immediately. Because if controller receives the success result of
           // action execute continuously, it will judege that invoker as up status all the time(It will not judge
           // the invoker status by timeout mechanism)
-          logging.info(this, s"get invoker unhealth message: invoker${Math.abs(p.instance.toInt)-1}")
+          logging.info(this, s"get invoker unhealthy message: invoker${Math.abs(p.instance.toInt)-1}")
           status = status.updated(Math.abs(p.instance.toInt)-1, new InvokerHealth(InstanceId(Math.abs(p.instance.toInt)-1, p.instance.name), UnHealthy))
           logStatus()
         }else{
