@@ -98,7 +98,7 @@ class Controller(val instance: ControllerInstanceId,
       (pathEndOrSingleSlash & get) {
         complete(info)
       }
-    } ~ apiV1.routes ~ swagger.swaggerRoutes ~ internalInvokerHealth
+    } ~ apiV1.routes ~ swagger.swaggerRoutes ~ internalInvokerHealth ~ getRunningActionNumber
   }
 
   // initialize datastores
@@ -153,6 +153,28 @@ class Controller(val instance: ControllerInstanceId,
             .invokerHealth()
             .map(_.count(_.status == Healthy).toJson)
         }
+      }
+    }
+  }
+
+  /**
+    * Handles GET /get-running-action-number URI.
+    *
+    * @return running action number
+    */
+  private val getRunningActionNumber= {
+    implicit val executionContext = actorSystem.dispatcher
+    (path("get-running-action-number") & get) {
+      parameter('controller.?, 'invoker.?) { (controller, invoker) =>
+          controller.map( id => {
+            logging.info(this, s"get controller running actions, controller request parameter value:${id}")
+            complete(loadBalancer.activeActivationsByController(id).map(_.toString))
+          }).orElse(
+            invoker.map( id => {
+              logging.info(this, s"get invoker running actions, invoker request parameter value:${id}")
+              complete(loadBalancer.activeActivationsByInvoker(id).map(_.toString))
+            })
+          ).getOrElse(complete("please input controller or invoker parameter"))
       }
     }
   }
