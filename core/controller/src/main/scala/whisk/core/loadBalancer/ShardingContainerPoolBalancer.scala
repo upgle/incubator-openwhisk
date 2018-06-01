@@ -159,6 +159,8 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
   /** State related to invocations and throttling */
   private val activations = TrieMap[ActivationId, ActivationEntry]()
   private val activationsPerNamespace = TrieMap[UUID, LongAdder]()
+  private val activationsPerController = TrieMap[ControllerInstanceId, LongAdder]()
+  private val activationsPerInvoker = TrieMap[InvokerInstanceId, LongAdder]()
   private val totalActivations = new LongAdder()
   private val totalActivationMemory = new LongAdder()
 
@@ -217,6 +219,8 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
   override def activeActivationsFor(namespace: UUID): Future[Int] =
     Future.successful(activationsPerNamespace.get(namespace).map(_.intValue()).getOrElse(0))
   override def totalActiveActivations: Future[Int] = Future.successful(totalActivations.intValue())
+  override def activeActivationsByController(controller: String): Future[Int] = Future.successful(activationsPerController.get(ControllerInstanceId(controller)).map(_.intValue()).getOrElse(0))
+  override def activeActivationsByInvoker(invoker: String): Future[Int] = Future.successful(activationsPerInvoker.get(InvokerInstanceId(invoker.toInt, Some(invoker))).map(_.intValue()).getOrElse(0))
   override def clusterSize: Int = schedulingState.clusterSize
 
   /** 1. Publish a message to the loadbalancer */
@@ -253,6 +257,8 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
     totalActivations.increment()
     totalActivationMemory.add(action.limits.memory.megabytes)
     activationsPerNamespace.getOrElseUpdate(msg.user.namespace.uuid, new LongAdder()).increment()
+    activationsPerController.getOrElseUpdate(controllerInstance, new LongAdder()).increment()
+    activationsPerInvoker.getOrElseUpdate(instance, new LongAdder()).increment()
 
     val timeout = action.limits.timeout.duration.max(TimeLimit.STD_DURATION) + 1.minute
     // Install a timeout handler for the catastrophic case where an active ack is not received at all
@@ -272,7 +278,9 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
           instance,
           action.limits.memory.megabytes.MB,
           timeoutHandler,
-          Promise[Either[ActivationId, WhiskActivation]]())
+          Promise[Either[ActivationId, WhiskActivation]](),
+          controllerInstance
+        )
       })
   }
 
@@ -354,6 +362,8 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
         totalActivations.decrement()
         totalActivationMemory.add(entry.memory.toMB * (-1))
         activationsPerNamespace.get(entry.namespaceId).foreach(_.decrement())
+        activationsPerController.get(entry.controllerName).foreach(_.decrement())
+        activationsPerInvoker.get(entry.invokerName).foreach(_.decrement())
         schedulingState.invokerSlots.lift(invoker.toInt).foreach(_.release())
 
         if (!forced) {
@@ -557,7 +567,7 @@ case class ShardingContainerPoolBalancerState(
       _clusterSize = actualSize
       val newTreshold = (totalInvokerThreshold / actualSize) max 1 // letting this fall below 1 doesn't make sense
       currentInvokerThreshold = newTreshold
-      _invokerSlots = _invokerSlots.map(_ => new ForcableSemaphore(currentInvokerThreshold))
+      _invokerSlots.foreach(_.setMaxAllowed(currentInvokerThreshold))
 
       logging.info(
         this,
@@ -596,4 +606,5 @@ case class ActivationEntry(id: ActivationId,
                            invokerName: InvokerInstanceId,
                            memory: ByteSize,
                            timeoutHandler: Cancellable,
-                           promise: Promise[Either[ActivationId, WhiskActivation]])
+                           promise: Promise[Either[ActivationId, WhiskActivation]],
+                           controllerName: ControllerInstanceId=ControllerInstanceId("0"))

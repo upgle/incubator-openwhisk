@@ -298,8 +298,26 @@
   retries: 12
   delay: 5
 
-- name: Sleep enough time to wait this invoker's status in load balancer is really up
-  shell: sleep {{ invoker.upStatusWaitTime }}
+- name: Judge controller whether running
+  shell: echo $(docker ps | grep controller0 | wc -l)
+  register: controllerExist
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['controllers'][0] }}"
+  when: zerodowntimeDeployment.enabled == true
+
+- name: wait this invoker{{ groups['invokers'].index(inventory_hostname) }} in controller become up
+  uri:
+    url: "{{ controller.protocol }}://{{ hostvars[groups['controllers'] | first].ansible_host }}:{{ controller.basePort }}/invokers"
+    validate_certs: no
+    client_key: "/tmp/{{ controller.ssl.key }}"
+    client_cert: "/tmp/{{ controller.ssl.cert }}"
+    return_content: yes
+  register: invokerStatus
+  until: invokerStatus.json|length >= 1 and "\"invoker{{ groups['invokers'].index(inventory_hostname) }}\":\"up\"" in invokerStatus.content
+  retries: 12
+  delay: 5
+  when: zerodowntimeDeployment.enabled == true and controllerExist.results[0].stdout != "0"
+  ignore_errors: True
 
 - name: create invoker jmx.yml
   template:
