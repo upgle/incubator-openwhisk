@@ -83,8 +83,6 @@ controller:
   loglevel: "{{ controller_loglevel | default(whisk_loglevel) | default('INFO') }}"
   entitlement:
     spi: "{{ controller_entitlement_spi | default('') }}"
-  initTime: "{{ controller_init_time | default('90s') }}"
-  notFinishedActionTime: "{{ controller_not_finished_action_time | default('120s') }}"
   protocol: "{{ controllerProtocolForSetup }}"
   ssl:
     cn: openwhisk-controllers
@@ -187,8 +185,6 @@ invoker:
     become: "{{ invoker_docker_become | default(false) }}"
     volumes: "{{ invoker_docker_volumes | default([]) }}"
   loglevel: "{{ invoker_loglevel | default(whisk_loglevel) | default('INFO') }}"
-  notFinishedActionTime: "{{ invoker_not_finished_action_time | default('70s') }}"
-  upStatusWaitTime: "{{ invoker_up_status_wait_time | default('60s') }}"
   username: "{{ invoker_username | default('invoker.user') }}"
   password: "{{ invoker_password | default('invoker.pass') }}"
   jmxremote:
@@ -390,3 +386,10 @@ nelo:
   project_name: "{{ nelo_project_name | default('lambda-test') }}"
   project_version: "{{ nelo_project_version | default('1.0.0') }}"
   serverUrl: "{{ nelo_server_url | default('http://nelo2-col.navercorp.com/_store') }}"
+
+# Zerodowntime deployment configuration
+# zerodowntime_deployment_switch values[true, false]
+# zerodowntime_deployment_solution values['sleep','apicall']
+zerodowntimeDeployment:
+  enabled: "{{ zerodowntime_deployment_switch | default(true) }}"
+  solution: "{{ zerodowntime_deployment_solution | default('apicall') }}"
