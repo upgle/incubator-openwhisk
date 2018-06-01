@@ -1,0 +1,18 @@
+#!/bin/sh
+
+if [ $# -ne 1 ]; then
+  echo 0
+else
+  invoker_name=$1
+  count=0
+  {% for host in groups['controllers'] %}
+    url="{{ controller.protocol }}://{{ hostvars[host].ansible_host }}:{{ controller.basePort+loop.index-1 }}/get-running-action-number?invoker=${invoker_name}"
+    {% if controller.protocol == 'https' %}
+        invoker_count=$(curl -s -k --cert /tmp/{{ controller.ssl.cert }} --key /tmp/{{ controller.ssl.key }} ${url})
+    {% else %}
+        invoker_count=$(curl -s ${url})
+    {% endif %}
+    (( count += invoker_count))
+  {% endfor %}
+  echo ${count}
+fi

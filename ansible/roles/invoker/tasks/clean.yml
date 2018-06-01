@@ -4,8 +4,9 @@
 - name: Judge current invoker whether deployed
   shell: echo $(docker ps | grep invoker{{ groups['invokers'].index(inventory_hostname) }} | wc -l)
   register: invokerDeployed
+  when: zerodowntimeDeployment.enabled == true
 
-- name: Disable invoker before remove invoker
+- name: Disable invoker{{ groups['invokers'].index(inventory_hostname) }} before remove invoker
   uri:
     url: "http://{{ ansible_host }}:{{ invoker.port + groups['invokers'].index(inventory_hostname) }}/disable"
     method: GET
@@ -14,10 +15,37 @@
     password: "{{ invoker.password }}"
     force_basic_auth: yes
   ignore_errors: True
-  when: invokerDeployed.stdout != "0"
+  when: zerodowntimeDeployment.enabled == true and invokerDeployed.stdout != "0"
 
-- name: Sleep some time to wait invoker to execute all non-finished actions
-  shell: sleep {{ invoker.notFinishedActionTime }}
+- name: copy controller cert to invoker nodes
+  copy:
+    src: "{{ openwhisk_home }}/ansible/roles/controller/files/{{ item }}"
+    dest: "/tmp"
+  with_items:
+        - "{{ controller.ssl.cert }}"
+        - "{{ controller.ssl.key }}"
+  ignore_errors: True
+  when: zerodowntimeDeployment.enabled == true and controller.protocol == 'https'
+
+- name: copy get-running-actions-on-invoker.sh to remote invoker directory when using apicall solution
+  template:
+    src: "{{ openwhisk_home }}/ansible/roles/invoker/templates/get-running-actions-on-invoker.sh.j2"
+    dest: "/tmp/get-running-actions-on-invoker.sh"
+    mode: 0777
+  when: zerodowntimeDeployment.enabled == true and zerodowntimeDeployment.solution == 'apicall'
+
+- name: wait invoker{{ groups['invokers'].index(inventory_hostname) }} to execute all non-finished actions using apicall solution
+  shell: /tmp/get-running-actions-on-invoker.sh {{ groups['invokers'].index(inventory_hostname) }}
+  register: runningActionCount
+  until: runningActionCount.stdout == '0'
+  retries: 60
+  delay: 5
+  when: zerodowntimeDeployment.enabled == true and zerodowntimeDeployment.solution == 'apicall'
+  ignore_errors: True
+
+- name: Sleep some time to wait invoker to execute all non-finished actions using sleep solution
+  shell: sleep 70s
+  when: zerodowntimeDeployment.enabled == true and zerodowntimeDeployment.solution == 'sleep'
 
 # Remove invoker containers.
 
