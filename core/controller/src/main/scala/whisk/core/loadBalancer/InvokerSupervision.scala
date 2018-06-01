@@ -181,7 +181,7 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
           // action execute continuously, it will judege that invoker as up status all the time(It will not judge
           // the invoker status by timeout mechanism)
           logging.info(this, s"get invoker unhealthy message: invoker${Math.abs(p.instance.toInt)-1}")
-          status = status.updated(Math.abs(p.instance.toInt)-1, new InvokerHealth(InvokerInstanceId(Math.abs(p.instance.toInt)-1, p.instance.uniqueName), UnHealthy))
+          status = status.updated(Math.abs(p.instance.toInt)-1, new InvokerHealth(InvokerInstanceId(Math.abs(p.instance.toInt)-1, p.instance.uniqueName), Unhealthy))
           logStatus()
         }else{
           self ! p
