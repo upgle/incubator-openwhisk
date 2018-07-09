@@ -14,7 +14,7 @@
                 "kind": "nodejs:6",
                 "default": true,
                 "image": {
-                    "prefix": "openwhisk",
+                    "prefix": "registry.navercorp.com/lambda",
                     "name": "nodejs6action",
                     "tag": "latest"
                 },
@@ -28,7 +28,7 @@
                 "kind": "nodejs:8",
                 "default": false,
                 "image": {
-                    "prefix": "openwhisk",
+                    "prefix": "registry.navercorp.com/lambda",
                     "name": "action-nodejs-v8",
                     "tag": "latest"
                 },
@@ -39,7 +39,7 @@
             {
                 "kind": "python",
                 "image": {
-                    "prefix": "openwhisk",
+                    "prefix": "registry.navercorp.com/lambda",
                     "name": "python2action",
                     "tag": "latest"
                 },
@@ -49,7 +49,7 @@
                 "kind": "python:2",
                 "default": true,
                 "image": {
-                    "prefix": "openwhisk",
+                    "prefix": "registry.navercorp.com/lambda",
                     "name": "python2action",
                     "tag": "latest"
                 },
@@ -58,7 +58,7 @@
             {
                 "kind": "python:3",
                 "image": {
-                    "prefix": "openwhisk",
+                    "prefix": "registry.navercorp.com/lambda",
                     "name": "python3action",
                     "tag": "latest"
                 },
@@ -87,7 +87,7 @@
             {
                 "kind": "swift:3.1.1",
                 "image": {
-                    "prefix": "openwhisk",
+                    "prefix": "registry.navercorp.com/lambda",
                     "name": "action-swift-v3.1.1",
                     "tag": "latest"
                 },
@@ -97,7 +97,7 @@
                 "kind": "swift:4.1",
                 "default": true,
                 "image": {
-                    "prefix": "openwhisk",
+                    "prefix": "registry.navercorp.com/lambda",
                     "name": "action-swift-v4.1",
                     "tag": "latest"
                 },
@@ -109,7 +109,7 @@
                 "kind": "java",
                 "default": true,
                 "image": {
-                    "prefix": "openwhisk",
+                    "prefix": "registry.navercorp.com/lambda",
                     "name": "java8action",
                     "tag": "latest"
                 },
@@ -127,7 +127,7 @@
                 "default": false,
                 "deprecated": false,
                 "image": {
-                    "prefix": "openwhisk",
+                    "prefix": "registry.navercorp.com/lambda",
                     "name": "action-php-v7.1",
                     "tag": "latest"
                 }
@@ -137,7 +137,7 @@
                 "default": true,
                 "deprecated": false,
                 "image": {
-                    "prefix": "openwhisk",
+                    "prefix": "registry.navercorp.com/lambda",
                     "name": "action-php-v7.2",
                     "tag": "latest"
                 }
@@ -158,7 +158,7 @@
     },
     "blackboxes": [
         {
-            "prefix": "openwhisk",
+            "prefix": "registry.navercorp.com/lambda",
             "name": "dockerskeleton",
             "tag": "latest"
         }
