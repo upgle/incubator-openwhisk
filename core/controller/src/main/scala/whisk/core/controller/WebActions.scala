@@ -555,8 +555,9 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
         if (a.namespace.defaultPackage) {
           Future.successful(a)
         } else {
-          // if action is not in default package and not exported, then check entitlement
-          val resource = Resource(a.namespace.root.toPath, Collection(Collection.PACKAGES), Some(a.namespace.last.toString))
+          // if action is not in the default package, then check entitlement
+          val resource =
+            Resource(a.namespace.root.toPath, Collection(Collection.PACKAGES), Some(a.namespace.last.toString))
           entitlementProvider
             .check(actionOwnerIdentity, Privilege.READ, resource) flatMap { _ =>
             pkgLookup(a.namespace.toFullyQualifiedEntityName) map { pkg =>
