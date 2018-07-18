@@ -455,9 +455,15 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
    */
   protected def getAction(actionName: FullyQualifiedEntityName)(
     implicit transid: TransactionId): Future[WhiskActionMetaData] = {
-    WhiskActionMetaData.resolveAction(entityStore, actionName) flatMap { resolvedName =>
-      WhiskActionMetaData.get(entityStore, resolvedName.toDocId)
-    }
+    WhiskActionMetaData.get(entityStore, actionName.toDocId)
+  }
+
+  /**
+   * Resolve action if it is binding
+   */
+  protected def resolveAction(actionName: FullyQualifiedEntityName)(
+    implicit transid: TransactionId): Future[FullyQualifiedEntityName] = {
+    WhiskActionMetaData.resolveAction(entityStore, actionName)
   }
 
   /**
@@ -556,10 +562,7 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
           Future.successful(a)
         } else {
           // if action is not in the default package, then check entitlement
-          val resource =
-            Resource(a.namespace.root.toPath, Collection(Collection.PACKAGES), Some(a.namespace.last.toString))
-          entitlementProvider
-            .check(actionOwnerIdentity, Privilege.READ, resource) flatMap { _ =>
+          checkEntitlement(actionOwnerIdentity, a) flatMap { _ =>
             pkgLookup(a.namespace.toFullyQualifiedEntityName) map { pkg =>
               (a.inherit(pkg.parameters))
             }
@@ -719,9 +722,11 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
    */
   private def actionLookup(actionName: FullyQualifiedEntityName)(
     implicit transid: TransactionId): Future[WhiskActionMetaData] = {
-    getAction(actionName) recoverWith {
-      case _: ArtifactStoreException | DeserializationException(_, _, _) =>
-        Future.failed(RejectRequest(NotFound))
+    resolveAction(actionName) flatMap { resolveAction =>
+      getAction(actionName) recoverWith {
+        case _: ArtifactStoreException | DeserializationException(_, _, _) =>
+          Future.failed(RejectRequest(NotFound))
+      }
     }
   }
 
@@ -760,6 +765,16 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
         Future.failed(RejectRequest(Unauthorized))
       }
     }
+  }
+
+  /**
+   * Checks if an action is executable.
+   */
+  private def checkEntitlement(identity: Identity, action: WhiskActionMetaData)(
+    implicit transid: TransactionId): Future[Unit] = {
+    val resource =
+      Resource(action.namespace.root.toPath, Collection(Collection.PACKAGES), Some(action.namespace.last.toString))
+    entitlementProvider.check(identity, Privilege.READ, resource)
   }
 
   /**
