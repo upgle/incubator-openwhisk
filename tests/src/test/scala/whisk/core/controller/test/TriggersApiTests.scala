@@ -33,6 +33,7 @@ import spray.json._
 import spray.json.DefaultJsonProtocol._
 
 import whisk.core.controller.WhiskTriggersApi
+import whisk.core.database.NoDocumentException
 import whisk.core.entitlement.Collection
 import whisk.core.entity._
 import whisk.core.entity.WhiskRule
@@ -411,6 +412,30 @@ class TriggersApiTests extends ControllerTestCommon with WhiskTriggersApi {
     put(entityStore, trigger)
     Post(s"$collectionPath/${trigger.name}") ~> Route.seal(routes(creds)) ~> check {
       status shouldBe NoContent
+    }
+  }
+
+  it should "not save activation while option volatile is true" in {
+    implicit val tid = transid()
+    val rule = WhiskRule(namespace, aname(), afullname(namespace, aname().name), afullname(namespace, "bogus action"))
+    val trigger = WhiskTrigger(namespace, rule.trigger.name, Parameters("x", "b"), rules = Some {
+      Map(rule.fullyQualifiedName(false) -> ReducedRule(rule.action, Status.ACTIVE))
+    })
+    put(entityStore, trigger)
+    put(entityStore, rule)
+    Post(s"$collectionPath/${trigger.name}?volatile=true") ~> Route.seal(routes(creds)) ~> check {
+      waitOnListActivationsInNamespace(namespace, 0, context)
+      val response = responseAs[JsObject]
+      val JsString(id) = response.fields("activationId")
+      response.fields("activationId") should not be None
+      val activationId = ActivationId.parse(id).get
+      val activationDoc = DocId(WhiskEntity.qualifiedName(namespace, activationId))
+      a[NoDocumentException] shouldBe thrownBy {
+        whisk.utils.retry({
+          println(s"trying to delete async activation doc: '${activationDoc}'")
+          deleteActivation(ActivationId(activationDoc.asString), context)
+        }, 30, Some(1.second))
+      }
     }
   }
 
