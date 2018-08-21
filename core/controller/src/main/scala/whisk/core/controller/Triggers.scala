@@ -44,6 +44,7 @@ import whisk.core.database.{ActivationStore, CacheChangeNotification}
 import whisk.core.entitlement.Collection
 import whisk.core.entity._
 import whisk.core.entity.types.EntityStore
+import whisk.core.lambda.LambdaLogging
 import whisk.http.ErrorResponse
 import whisk.http.Messages
 import whisk.core.database.UserContext
@@ -169,6 +170,8 @@ trait WhiskTriggersApi extends WhiskCollectionAPI {
                       triggerActivation
                   }
                   .map { activation =>
+                    // Emit trigger metric, send regardless of the volatile option.
+                    LambdaLogging.emitTriggerMetric(user: Identity, entityName: FullyQualifiedEntityName)
                     if (volatile) // the trigger activation is always success
                       logging.info(this, s"skipping save the activation ${activation.activationId}")
                     else
