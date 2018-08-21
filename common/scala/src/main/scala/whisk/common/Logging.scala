@@ -263,6 +263,14 @@ object LoggingMarkers {
   def INVOKER_SHAREDPACKAGE(path: String) = LogMarkerToken(invoker, "sharedPackage", count, None, Map("path" -> path))
   def INVOKER_CONTAINERPOOL(state: String) = LogMarkerToken(invoker, "containerPool", count, Some(state), Map("state" -> state))
   def INVOKER_RETRY = LogMarkerToken(invoker, "runRetry", count)
+  def INVOKER_RUN(namespace: String) = LogMarkerToken(invoker, "run", count, None, Map("namespace" -> namespace))
+  def INVOKER_RUN(namespace: String, action: String) = LogMarkerToken(invoker, "run_" + namespace, count, None, Map("action" -> action))
+  def INVOKER_RUN_INFO(namespace: String, memory: String, kind: String) = LogMarkerToken(invoker, "runInfo_" + namespace, count, None, Map("memory" -> memory, "kind" -> kind))
+  def INVOKER_ACTIVATION_DURATION(namespace: String, memory: String) = LogMarkerToken("invoker", "activation", "duration", None, Map("namespace" -> namespace, "memory" -> memory))
+  def INVOKER_ACTIVATION_ACTION_DURATION(namespace: String, action: String) = LogMarkerToken("invoker", "activation_" + namespace, "duration", None, Map("action" -> action))
+
+  def INVOKER_ACTIVATION_ERROR(namespace: String) = LogMarkerToken("invoker", "activation", "error", None, Map("namespace" -> namespace))
+  def INVOKER_ACTIVATION_ERROR(namespace: String, action: String) = LogMarkerToken("invoker", "activation_" + namespace, "error", None, Map("action" -> action))
 
   /*
    * Controller related markers

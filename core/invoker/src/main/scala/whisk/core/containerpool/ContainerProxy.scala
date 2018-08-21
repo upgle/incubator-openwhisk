@@ -38,6 +38,7 @@ import whisk.core.entity.size._
 import whisk.core.entity.ExecManifest.ImageName
 import whisk.http.Messages
 import akka.event.Logging.InfoLevel
+import whisk.core.lambda.LambdaLogging
 import pureconfig.loadConfigOrThrow
 import whisk.core.ConfigKeys
 
@@ -364,6 +365,9 @@ class ContainerProxy(
           // but potentially under-estimates actual deadline
           "deadline" -> (Instant.now.toEpochMilli + actionTimeout.toMillis).toString.toJson)
 
+        // Emit custom metric
+        LambdaLogging.emitRunMetric(job)
+
         container
           .run(parameters, JsObject(authEnvironment.fields ++ environment.fields), actionTimeout)(job.msg.transid)
           .map {
@@ -416,19 +420,8 @@ class ContainerProxy(
 
     // Storing the record. Entirely asynchronous and not waited upon.
     activationWithLogs.map(_.fold(_.activation, identity)).foreach { a =>
-      for(
-        path <- a.annotations.get("path");
-        duration <- a.duration
-      ) yield {
-        val tags = Map(
-          "namespace" -> a.namespace.asString,
-          "action" -> path.convertTo[String]
-        )
-        MetricEmitter.emitHistogramMetric(LogMarkerToken("invoker", "activation", "duration", None, tags), duration)
-        if (!a.response.isSuccess) {
-          MetricEmitter.emitCounterMetric(LogMarkerToken("invoker", "activation", "error", None, tags))
-        }
-      }
+      // Emit activation custom metric
+      LambdaLogging.emitActivationMetric(a)
       if (!(a.response.isSuccess && job.msg.volatile))
         storeActivation(tid, a)
       else
