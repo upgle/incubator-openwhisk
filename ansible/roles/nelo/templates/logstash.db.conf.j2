@@ -2,12 +2,14 @@ input {
 file {
   path => "/var/log/messages"
   add_field => { "logType" => "docker" }
+  type => "docker"
 }
 {% if couchdbContainerId.stdout != '' %}
 file {
   codec => "json"
   path => "/var/lib/docker/containers/{{ couchdbContainerId.stdout }}/{{ couchdbContainerId.stdout }}-json.log"
   add_field => { "logType" => "couchdb" }
+  type => "couchdb"
 }
 {% endif %}
 {% if kafkaContainerId.stdout != '' %}
@@ -15,6 +17,7 @@ file {
   codec => "json"
   path => "/var/lib/docker/containers/{{ kafkaContainerId.stdout }}/{{ kafkaContainerId.stdout }}-json.log"
   add_field => { "logType" => "kafka" }
+  type => "kafka"
 }
 {% endif %}
 {% if zookeeperContainerId.stdout != '' %}
@@ -22,14 +25,42 @@ file {
   codec => "json"
   path => "/var/lib/docker/containers/{{ zookeeperContainerId.stdout }}/{{ zookeeperContainerId.stdout }}-json.log"
   add_field => { "logType" => "zookeeper" }
+  type => "zookeeper"
 }
 {% endif %}
 }
 
 filter {
-if ([path] =~ "messages" and [message] !~ "dockerd") {
-   drop { }
-}
+  if ([type] == "couchdb") {
+    grok {
+      match => {
+        "log" => "\[%{LOGLEVEL:logLevel}\] %{DATA:timestamp} %{DATA:node} %{DATA:unused} %{DATA:unused} %{GREEDYDATA:body}"
+      }
+    }
+  } else if ([type] == "kafka" ) {
+    grok {
+      match => {
+        "log" => "\[%{DATA:timestamp}\] %{LOGLEVEL:loglevel} (\[%{DATA:component}\]: )?%{GREEDYDATA:body}"
+      }
+    }
+  } else if ([type] == "zookeeper") {
+    grok {
+      match => {
+        "log" => "%{DATA:timestamp} \[%{DATA:unused}\] - %{LOGLEVEL:logLevel}  \[%{GREEDYDATA:compoent}\] - %{GREEDYDATA:body}"
+      }
+    }
+  } else {
+    if ([message] !~ "dockerd") {
+      drop { }
+    } else {
+      grok {
+        match => {
+          "message" => '%{DATA:unused} %{PROG:program}(?:\[%{POSINT:pid}\])?: time="%{DATA:timestamp}" level=%{LOGLEVEL:logLevel} msg="%{GREEDYDATA:body}"'
+        }
+      }
+    }
+  }
+
 if ([path] =~ "messages" ) {
     mutate {
       add_field => {
@@ -37,7 +68,7 @@ if ([path] =~ "messages" ) {
         "projectVersion" => "{{ nelo.project_version }}"
         "logSource" => "logFile"
       }
-     remove_field => ["path","@timestamp","@version"]
+     remove_field => ["path","@timestamp","@version", "type", "unused"]
     }
 }else{
     json {
@@ -48,11 +79,10 @@ if ([path] =~ "messages" ) {
       add_field => {
         "projectName" => "{{ nelo.project_name }}"
         "projectVersion" => "{{ nelo.project_version }}"
-        "body" => "%{log}"
+        "message" => "%{log}"
         "logSource" => "%{stream}"
-        "logTime" => "%{time}"
       }
-      remove_field => ["message","@timestamp","type","path","@version","time","stream","log"]
+      remove_field => ["@timestamp","type","path","@version","time","stream","log", "unused"]
     }
 }
 }
