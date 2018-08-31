@@ -2,39 +2,65 @@ input {
 file {
   path => "/var/log/messages"
   add_field => { "logType" => "docker" }
+  type => "docker"
 }
 {% if 'controller' in deployedComponents.stdout %}
 file {
   path => "{{ whisk_logs_dir }}/controller*/controller*_logs.log"
   add_field => { "logType" => "controller" }
+  type => "controller"
 }
 {% endif %}
 {% if 'invoker' in deployedComponents.stdout %}
 file {
   path => "{{ whisk_logs_dir }}/invoker*/invoker*_logs.log"
   add_field => { "logType" => "invoker" }
+  type => "invoker"
 }
 {% endif %}
 {% if 'nginx' in deployedComponents.stdout %}
 file {
   path => "{{ whisk_logs_dir }}/nginx/nginx_error.log"
   add_field => { "logType" => "nginx" }
+  type => "nginx"
 }
 {% endif %}
 }
 
 filter {
-if ([path] =~ "messages" and [message] !~ "dockerd") {
-   drop { }
-}
-mutate {
-  add_field => {
-    "projectName" => "{{ nelo.project_name }}"
-    "projectVersion" => "{{ nelo.project_version }}"
-    "logSource" => "logFile"
+  if ([type] in ["controller", "invoker"] ) {
+    grok {
+      match => [
+        "message", "\[%{DATA:timestamp}\] \[%{LOGLEVEL:logLevel}\] (\[%{DATA:transactionID}\] )?(\[%{DATA:component}\] )?%{GREEDYDATA:body}",
+        "message", "\[%{LOGLEVEL:logLevel}\] \[%{DATA:timestamp}\] \[%{DATA:thread}\] \[%{DATA:actor}\] (\[%{DATA:transactionID}\] )?(\[%{DATA:component}\] )?%{GREEDYDATA:body}"
+      ]
+    }
+  } else if ([type] == "nginx" ) {
+    grok {
+      match => {
+        "message" => "%{DATA:timestamp} \[%{LOGLEVEL:logLevel}\] %{NUMBER:pid}#%{NUMBER:tid}: (\*%{NUMBER:connection_id} )?%{GREEDYDATA:body}"
+      }
+    }
+  } else {
+    if ([message] !~ "dockerd") {
+      drop { }
+    } else {
+      grok {
+        match => {
+          "message" => '%{DATA:unused} %{PROG:program}(?:\[%{POSINT:pid}\])?: time="%{DATA:timestamp}" level=%{LOGLEVEL:logLevel} msg="%{GREEDYDATA:body}"'
+        }
+      }
+    }
   }
- remove_field => ["path","@timestamp","@version"]
-}
+
+  mutate {
+    add_field => {
+      "projectName" => "{{ nelo.project_name }}"
+      "projectVersion" => "{{ nelo.project_version }}"
+      "logSource" => "logFile"
+    }
+    remove_field => ["path","@timestamp","@version", "unused", "type"]
+  }
 }
 
 output {
