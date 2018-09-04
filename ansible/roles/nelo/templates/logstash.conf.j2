@@ -30,9 +30,10 @@ file {
 filter {
   if ([type] in ["controller", "invoker"] ) {
     grok {
-      match => {
-        "message" => "\[%{DATA:timestamp}\] \[%{LOGLEVEL:logLevel}\] \[%{DATA:transactionID}\] \[%{DATA:component}\] %{GREEDYDATA:body}"
-      }
+      match => [
+        "message", "\[%{DATA:timestamp}\] \[%{LOGLEVEL:logLevel}\] (\[%{DATA:transactionID}\] )?(\[%{DATA:component}\] )?%{GREEDYDATA:body}",
+        "message", "\[%{LOGLEVEL:logLevel}\] \[%{DATA:timestamp}\] \[%{DATA:thread}\] \[%{DATA:actor}\] (\[%{DATA:transactionID}\] )?(\[%{DATA:component}\] )?%{GREEDYDATA:body}"
+      ]
     }
   } else if ([type] == "nginx" ) {
     grok {

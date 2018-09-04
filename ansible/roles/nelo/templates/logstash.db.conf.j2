@@ -34,13 +34,13 @@ filter {
   if ([type] == "couchdb") {
     grok {
       match => {
-        "log" => "\[%{LOGLEVEL:logLevel}\] %{DATA:timestamp} %{DATA:node} %{DATA:unused} -------- %{GREEDYDATA:body}"
+        "log" => "\[%{LOGLEVEL:logLevel}\] %{DATA:timestamp} %{DATA:node} %{DATA:unused} %{DATA:unused} %{GREEDYDATA:body}"
       }
     }
   } else if ([type] == "kafka" ) {
     grok {
       match => {
-        "log" => "\[%{DATA:timestamp}\] %{LOGLEVEL:loglevel} \[%{DATA:component}\]: %{GREEDYDATA:body}"
+        "log" => "\[%{DATA:timestamp}\] %{LOGLEVEL:loglevel} (\[%{DATA:component}\]: )?%{GREEDYDATA:body}"
       }
     }
   } else if ([type] == "zookeeper") {
