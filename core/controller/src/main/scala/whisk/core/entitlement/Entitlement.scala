@@ -402,7 +402,7 @@ protected[core] abstract class EntitlementProvider(
         }
         Future.successful(())
       } else {
-        logging.info(this, s"'${user.namespace.name}' has exceeded its throttle limit, ${limit.errorMsg}")
+        logging.warn(this, s"'${user.namespace.name}' has exceeded its throttle limit, ${limit.errorMsg}")
         val metric = Metric(limit.limitName, 1)
         UserEvents.send(
           eventProducer,

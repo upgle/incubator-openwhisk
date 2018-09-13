@@ -262,6 +262,9 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
         }
 
         logging.error(this, s"failed to schedule $actionType action, invokers to use: $invokerStates")
+        logging.error(
+          this,
+          s"Failed to invoke action ${action.fullyQualifiedName(false)}, error: no invokers available")
         Future.failed(LoadBalancerException("No invokers available"))
       }
   }
@@ -331,7 +334,9 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
           start,
           s"posted to ${status.topic()}[${status.partition()}][${status.offset()}]",
           logLevel = InfoLevel)
-      case Failure(_) => transid.failed(this, start, s"error on posting to topic $topic")
+      case Failure(_) =>
+         logging.error(this, s"Failed to invoke action ${msg.action}, error: error on posting to topic $topic")
+         transid.failed(this, start, s"error on posting to topic $topic")
     }
   }
 
@@ -403,6 +408,7 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
           entry.timeoutHandler.cancel()
           entry.promise.trySuccess(response)
         } else {
+          logging.error(this, s"Failed to invoke action ${aid.toString}, error: timeout waiting for the active ack")
           entry.promise.tryFailure(new Throwable("no active ack received"))
         }
 
@@ -587,7 +593,7 @@ case class ShardingContainerPoolBalancerState(
       }
     }
 
-    logging.info(
+    logging.warn(
       this,
       s"loadbalancer invoker status updated. managedInvokers = $managed blackboxInvokers = $blackboxes")(
       TransactionId.loadbalancer)
@@ -618,7 +624,7 @@ case class ShardingContainerPoolBalancerState(
 
       _invokerSlots.foreach(_.setMaxAllowed(currentInvokerThreshold.toMB.toInt))
 
-      logging.info(
+      logging.warn(
         this,
         s"loadbalancer cluster size changed to $actualSize active nodes. invokerThreshold = $currentInvokerThreshold")(
         TransactionId.loadbalancer)
