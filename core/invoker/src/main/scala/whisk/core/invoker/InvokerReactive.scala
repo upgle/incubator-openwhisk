@@ -25,6 +25,7 @@ import akka.event.Logging.InfoLevel
 import akka.stream.ActorMaterializer
 import org.apache.kafka.common.errors.RecordTooLargeException
 import pureconfig._
+import spray.json.DefaultJsonProtocol._
 import spray.json._
 import whisk.common.tracing.WhiskTracerProvider
 import whisk.common._
@@ -137,6 +138,12 @@ class InvokerReactive(
       }
     }
 
+    if (activationResult.response.isContainerError || activationResult.response.isWhiskError) {
+      val actionPath =
+        activationResult.annotations.getAs[String](WhiskActivation.pathAnnotation).getOrElse("unknown_path")
+      logging.error(this, s"Failed to invoke action $actionPath, error: ${activationResult.response.toString}")
+    }
+    
     send(Right(if (blockingInvoke) activationResult else activationResult.withoutLogsOrResult)).recoverWith {
       case t if t.getCause.isInstanceOf[RecordTooLargeException] =>
         send(Left(activationResult.activationId), recovery = true)
