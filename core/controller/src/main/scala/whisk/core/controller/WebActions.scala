@@ -366,6 +366,9 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
   /** Configured authentication provider. */
   protected val authenticationProvider = SpiLoader.get[AuthenticationDirectiveProvider]
 
+  /** The collection type for this trait. */
+  protected val collection = Collection(Collection.ACTIONS)
+
   /** The prefix for web invokes e.g., /web. */
   private lazy val webRoutePrefix = {
     pathPrefix(webInvokePathSegments.map(_segmentStringToPathMatcher(_)).reduceLeft(_ / _))
@@ -439,16 +442,6 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
         }
       }
     }
-  }
-
-  /**
-   * Gets action from datastore.
-   * if it is contained in the package, then resolve and merge parameters
-   * This method is factored out to allow mock testing
-   */
-  protected def resolveActionAndMergeParameters(actionName: FullyQualifiedEntityName)(
-    implicit transid: TransactionId): Future[WhiskActionMetaData] = {
-    WhiskActionMetaData.resolveActionAndMergeParameters(entityStore, actionName)
   }
 
   /**
@@ -667,6 +660,18 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
   }
 
   /**
+    * Gets action from datastore.
+    * if it is in a package, then resolve and merge parameters only,
+    * except for annotations.
+    *
+    * @return future action document
+    */
+  private def resolveActionAndMergeParameters(actionName: FullyQualifiedEntityName)(
+    implicit transid: TransactionId): Future[WhiskActionMetaData] = {
+    WhiskActionMetaData.resolveActionAndMergeParameters(entityStore, actionName)
+  }
+
+  /**
    * Gets the action if it exists and fail future with RejectRequest if it does not.
    *
    * @return future action document or NotFound rejection
@@ -723,7 +728,7 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
     implicit transid: TransactionId): Future[Unit] = {
 
     val fqn = action.fullyQualifiedName(false)
-    val resource = Resource(fqn.path, Collection(Collection.ACTIONS), Some(fqn.name.asString))
+    val resource = Resource(fqn.path, collection, Some(fqn.name.asString))
     entitlementProvider.check(identity, Privilege.ACTIVATE, resource)
   }
 
