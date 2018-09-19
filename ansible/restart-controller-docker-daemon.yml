@@ -1,0 +1,72 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more contributor
+# license agreements; and to You under the Apache License, Version 2.0.
+---
+# This playbook: when docker network problem appear, lead to controller's all invoker status is down,
+# Should remove the controller from nginx's configuration and restart docker daemon,
+# When controller's all invoker status become up, add the controller to nginx's configuration again.
+- hosts: controllers
+  vars:
+    host_group: "{{ groups['controllers'] }}"
+    name_prefix: "controller"
+    controller_index_base: 0
+  serial: '1'
+  tasks:
+  - name: get controller name and index
+    set_fact:
+      controller_name: "{{ name_prefix ~ host_group.index(inventory_hostname) }}"
+      controller_index:
+        "{{ (controller_index_base|int) + host_group.index(inventory_hostname) }}"
+
+  - name: Make sure nginx's configuration is right
+    template:
+      src: "{{ openwhisk_home }}/ansible/roles/nginx/templates/nginx.conf.j2"
+      dest: "{{ nginx.confdir }}/nginx.conf"
+    delegate_to: "{{ item }}"
+    with_items: "{{ groups['edge'] }}"
+
+  - name: delete the L7 health check file from this controller node's nginx only
+    file:
+      path: "{{ nginx.confdir }}/monitor/l7check.nhn"
+      state: absent
+    delegate_to: "{{ item }}"
+    with_items: "{{ groups['edge'][controller_index|int] }}"
+
+  - name: Sleep some time in order to switch traffic to alive node
+    shell: sleep {{ nginx.sleeptime }}
+
+  - name: Remove the controller from nginx's upstream configuration
+    shell:
+         docker exec -t nginx sh -c "sed -i  \"s/server {{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/#server {{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/g\"  /etc/nginx/nginx.conf  && nginx -s reload"
+    delegate_to: "{{ item }}"
+    with_items: "{{ groups['edge'] }}"
+
+  - name: restart controller node's docker daemon
+    shell:
+         systemctl restart docker.service
+    become: true
+
+  - name: Wait all invokers in {{ controller_name }} become up
+    uri:
+      url: "{{ controller.protocol }}://{{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/invokers"
+      validate_certs: no
+      client_key: "{{ controller.confdir }}/controller{{ groups['controllers'].index(inventory_hostname) }}/{{ controller.ssl.key }}"
+      client_cert: "{{ controller.confdir }}/controller{{ groups['controllers'].index(inventory_hostname) }}/{{ controller.ssl.cert }}"
+      return_content: yes
+    register: invokerStatus
+    until: invokerStatus.json|length >= 1 and "unhealthy" not in invokerStatus.content and "down" not in invokerStatus.content
+    retries: 14
+    delay: 5
+
+  - name: Add the controller to nginx's upstream configuration
+    shell:
+         docker exec -t nginx sh -c "sed -i  \"s/#server {{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/server {{ ansible_host }}:{{ controller.basePort + (controller_index | int) }}/g\"  /etc/nginx/nginx.conf  && nginx -s reload"
+    delegate_to: "{{ item }}"
+    with_items: "{{ groups['edge'] }}"
+
+  - name: ensure L7 health check file exist on this controller node's nginx only
+    copy:
+      content: ""
+      dest: "{{ nginx.confdir }}/monitor/l7check.nhn"
+      force: no
+    delegate_to: "{{ item }}"
+    with_items: "{{ groups['edge'][controller_index|int] }}"
