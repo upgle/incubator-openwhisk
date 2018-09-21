@@ -181,7 +181,8 @@ protected[actions] trait PrimitiveActions {
 
     val postedFuture = loadBalancer.publish(action, message)
 
-    MetricEmitter.emitCounterMetric(LoggingMarkers.CONTROLLER_ACTION_INVOKE(action.limits.memory.megabytes.toString, action.exec.kind))
+    MetricEmitter.emitCounterMetric(
+      LoggingMarkers.CONTROLLER_ACTION_INVOKE(action.limits.memory.megabytes.toString, action.exec.kind))
 
     postedFuture andThen {
       case Success(_) => transid.finished(this, startLoadbalancer)

@@ -189,7 +189,9 @@ class DockerClient(dockerHost: Option[String] = None,
     executeProcess(cmd, timeout).andThen {
       case Success(_) => {
         val t1 = System.currentTimeMillis()
-        MetricEmitter.emitHistogramMetric(LogMarkerToken("docker", "runCmd", "duration", Some(args.head), Map("cmd" -> args.head)), t1 - t0)
+        MetricEmitter.emitHistogramMetric(
+          LogMarkerToken("docker", "runCmd", "duration", Some(args.head), Map("cmd" -> args.head)),
+          t1 - t0)
         transid.finished(this, start)
       }
       case Failure(t) => transid.failed(this, start, t.getMessage, ErrorLevel)

@@ -143,7 +143,7 @@ class InvokerReactive(
         activationResult.annotations.getAs[String](WhiskActivation.pathAnnotation).getOrElse("unknown_path")
       logging.error(this, s"Failed to invoke action $actionPath, error: ${activationResult.response.toString}")
     }
-    
+
     send(Right(if (blockingInvoke) activationResult else activationResult.withoutLogsOrResult)).recoverWith {
       case t if t.getCause.isInstanceOf[RecordTooLargeException] =>
         send(Left(activationResult.activationId), recovery = true)

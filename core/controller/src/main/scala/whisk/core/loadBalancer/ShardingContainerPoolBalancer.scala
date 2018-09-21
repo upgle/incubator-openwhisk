@@ -221,8 +221,11 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
   override def activeActivationsFor(namespace: UUID): Future[Int] =
     Future.successful(activationsPerNamespace.get(namespace).map(_.intValue()).getOrElse(0))
   override def totalActiveActivations: Future[Int] = Future.successful(totalActivations.intValue())
-  override def activeActivationsByController(controller: String): Future[Int] = Future.successful(activationsPerController.get(ControllerInstanceId(controller)).map(_.intValue()).getOrElse(0))
-  override def activeActivationsByInvoker(invoker: String): Future[Int] = Future.successful(activationsPerInvoker.get(InvokerInstanceId(invoker.toInt, Some(invoker))).map(_.intValue()).getOrElse(0))
+  override def activeActivationsByController(controller: String): Future[Int] =
+    Future.successful(activationsPerController.get(ControllerInstanceId(controller)).map(_.intValue()).getOrElse(0))
+  override def activeActivationsByInvoker(invoker: String): Future[Int] =
+    Future.successful(
+      activationsPerInvoker.get(InvokerInstanceId(invoker.toInt, Some(invoker))).map(_.intValue()).getOrElse(0))
   override def clusterSize: Int = schedulingState.clusterSize
 
   /** 1. Publish a message to the loadbalancer */
@@ -304,8 +307,7 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
           action.limits.memory.megabytes.MB,
           timeoutHandler,
           Promise[Either[ActivationId, WhiskActivation]](),
-          controllerInstance
-        )
+          controllerInstance)
       })
   }
 
@@ -335,8 +337,8 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
           s"posted to ${status.topic()}[${status.partition()}][${status.offset()}]",
           logLevel = InfoLevel)
       case Failure(_) =>
-         logging.error(this, s"Failed to invoke action ${msg.action}, error: error on posting to topic $topic")
-         transid.failed(this, start, s"error on posting to topic $topic")
+        logging.error(this, s"Failed to invoke action ${msg.action}, error: error on posting to topic $topic")
+        transid.failed(this, start, s"error on posting to topic $topic")
     }
   }
 
@@ -665,4 +667,4 @@ case class ActivationEntry(id: ActivationId,
                            memory: ByteSize,
                            timeoutHandler: Cancellable,
                            promise: Promise[Either[ActivationId, WhiskActivation]],
-                           controllerName: ControllerInstanceId=ControllerInstanceId("0"))
+                           controllerName: ControllerInstanceId = ControllerInstanceId("0"))

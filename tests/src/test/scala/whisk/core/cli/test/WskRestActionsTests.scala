@@ -31,86 +31,93 @@ import system.rest.RestUtil
 import whisk.utils.retry
 
 /**
-  * Tests actions via rest.
-  */
+ * Tests actions via rest.
+ */
 @RunWith(classOf[JUnitRunner])
-class WskRestActionsTests extends TestHelpers with WskTestHelpers with RestUtil with BeforeAndAfterAll with WskActorSystem{
-    val wsk: common.rest.WskRestOperations = new WskRestOperations
-    private implicit val wskprops = WskProps()
-    val namespace = wsk.namespace.whois()
+class WskRestActionsTests
+    extends TestHelpers
+    with WskTestHelpers
+    with RestUtil
+    with BeforeAndAfterAll
+    with WskActorSystem {
+  val wsk: common.rest.WskRestOperations = new WskRestOperations
+  private implicit val wskprops = WskProps()
+  val namespace = wsk.namespace.whois()
 
-    protected val testRoutePath: String = "/api/v1/namespaces"
+  protected val testRoutePath: String = "/api/v1/namespaces"
 
-    behavior of "Wsk Actions"
+  behavior of "Wsk Actions"
 
-    it should "save activation while option volatile is false or not passed" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
-        val name = "echo"
-        val file = Some(TestUtils.getTestActionFilename("echo.js"))
-        val host = getServiceURL
-        val url = host + s"$testRoutePath/$namespace/actions/$name"
+  it should "save activation while option volatile is false or not passed" in withAssetCleaner(wskprops) {
+    (wp, assetHelper) =>
+      val name = "echo"
+      val file = Some(TestUtils.getTestActionFilename("echo.js"))
+      val host = getServiceURL
+      val url = host + s"$testRoutePath/$namespace/actions/$name"
 
-        assetHelper.withCleaner(wsk.action, name) { (action, _) =>
-            action.create(name, file)
-        }
+      assetHelper.withCleaner(wsk.action, name) { (action, _) =>
+        action.create(name, file)
+      }
 
-        val response = RestAssured
-            .given()
-            .header("content-type", "application/json")
-            .config(sslconfig)
-            .auth()
-            .preemptive()
-            .basic(wskprops.authKey.split(":")(0), wskprops.authKey.split(":")(1))
-            .post(url)
+      val response = RestAssured
+        .given()
+        .header("content-type", "application/json")
+        .config(sslconfig)
+        .auth()
+        .preemptive()
+        .basic(wskprops.authKey.split(":")(0), wskprops.authKey.split(":")(1))
+        .post(url)
 
-        val activationId = Some(response.body.asString.replaceAll("[\\s\"{}]","").split(":")(1))
-        retry({wsk.activation.get(activationId, expectedExitCode = OK.intValue)}, 10, Some(200.milliseconds))
+      val activationId = Some(response.body.asString.replaceAll("[\\s\"{}]", "").split(":")(1))
+      retry({ wsk.activation.get(activationId, expectedExitCode = OK.intValue) }, 10, Some(200.milliseconds))
+  }
+
+  it should "not save activation while option volatile is true" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
+    val name = "echo"
+    val file = Some(TestUtils.getTestActionFilename("echo.js"))
+    val host = getServiceURL
+    val url = host + s"$testRoutePath/$namespace/actions/$name?volatile=true"
+
+    assetHelper.withCleaner(wsk.action, name) { (action, _) =>
+      action.create(name, file)
     }
 
-    it should "not save activation while option volatile is true" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
-        val name = "echo"
-        val file = Some(TestUtils.getTestActionFilename("echo.js"))
-        val host = getServiceURL
-        val url = host + s"$testRoutePath/$namespace/actions/$name?volatile=true"
+    val response = RestAssured
+      .given()
+      .header("content-type", "application/json")
+      .config(sslconfig)
+      .auth()
+      .preemptive()
+      .basic(wskprops.authKey.split(":")(0), wskprops.authKey.split(":")(1))
+      .post(url)
 
-        assetHelper.withCleaner(wsk.action, name) { (action, _) =>
-            action.create(name, file)
-        }
+    val activationId = Some(response.body.asString.replaceAll("[\\s\"{}]", "").split(":")(1))
+    the[TestFailedException] thrownBy {
+      retry({ wsk.activation.get(activationId, expectedExitCode = OK.intValue) }, 2, Some(1000.milliseconds))
+    } should have message "404 was not equal to 200"
+  }
 
-        val response = RestAssured
-            .given()
-            .header("content-type", "application/json")
-            .config(sslconfig)
-            .auth()
-            .preemptive()
-            .basic(wskprops.authKey.split(":")(0), wskprops.authKey.split(":")(1))
-            .post(url)
+  it should "save activation while error happens when invoking action even volatile is true" in withAssetCleaner(
+    wskprops) { (wp, assetHelper) =>
+    val name = "echoError"
+    val file = Some(TestUtils.getTestActionFilename("echoError.js"))
+    val host = getServiceURL
+    val url = host + s"$testRoutePath/$namespace/actions/$name?volatile=true"
 
-        val activationId = Some(response.body.asString.replaceAll("[\\s\"{}]","").split(":")(1))
-        the[TestFailedException] thrownBy{
-          retry({wsk.activation.get(activationId, expectedExitCode = OK.intValue)}, 2, Some(1000.milliseconds))
-        } should have message "404 was not equal to 200"
+    assetHelper.withCleaner(wsk.action, name) { (action, _) =>
+      action.create(name, file)
     }
 
-    it should "save activation while error happens when invoking action even volatile is true" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
-        val name = "echoError"
-        val file = Some(TestUtils.getTestActionFilename("echoError.js"))
-        val host = getServiceURL
-        val url = host + s"$testRoutePath/$namespace/actions/$name?volatile=true"
+    val response = RestAssured
+      .given()
+      .header("content-type", "application/json")
+      .config(sslconfig)
+      .auth()
+      .preemptive()
+      .basic(wskprops.authKey.split(":")(0), wskprops.authKey.split(":")(1))
+      .post(url)
 
-        assetHelper.withCleaner(wsk.action, name) { (action, _) =>
-            action.create(name, file)
-        }
-
-        val response = RestAssured
-            .given()
-            .header("content-type", "application/json")
-            .config(sslconfig)
-            .auth()
-            .preemptive()
-            .basic(wskprops.authKey.split(":")(0), wskprops.authKey.split(":")(1))
-            .post(url)
-
-        val activationId = Some(response.body.asString.replaceAll("[\\s\"{}]","").split(":")(1))
-        retry({wsk.activation.get(activationId, expectedExitCode = OK.intValue)}, 10, Some(200.milliseconds))
-    }
+    val activationId = Some(response.body.asString.replaceAll("[\\s\"{}]", "").split(":")(1))
+    retry({ wsk.activation.get(activationId, expectedExitCode = OK.intValue) }, 10, Some(200.milliseconds))
+  }
 }

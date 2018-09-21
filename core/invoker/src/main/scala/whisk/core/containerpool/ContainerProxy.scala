@@ -368,7 +368,11 @@ class ContainerProxy(
           "deadline" -> (Instant.now.toEpochMilli + actionTimeout.toMillis).toString.toJson)
 
         // Emit custom metric
-        LambdaLogging.emitRunMetric(job.msg.user.namespace.name.asString, job.msg.action.fullPath.asString, job.action.limits.memory.megabytes.toString, job.action.exec.kind)
+        LambdaLogging.emitRunMetric(
+          job.msg.user.namespace.name.asString,
+          job.msg.action.fullPath.asString,
+          job.action.limits.memory.megabytes.toString,
+          job.action.exec.kind)
 
         container
           .run(parameters, JsObject(authEnvironment.fields ++ environment.fields), actionTimeout)(job.msg.transid)

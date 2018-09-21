@@ -17,11 +17,9 @@ import scala.concurrent.duration.DurationInt
 import whisk.utils.retry
 
 import scala.util.Try
-
-
 @RunWith(classOf[JUnitRunner])
 class ZeroDownTimeDeploymentTests
-  extends TestHelpers
+    extends TestHelpers
     with Matchers
     with ScalaFutures
     with WskActorSystem
@@ -35,14 +33,11 @@ class ZeroDownTimeDeploymentTests
   val invokerPassword = WhiskProperties.getInvokerPassword
   val allInvokerStatusUrl = s"$controllerProtocol://$controllerAddress/invokers"
 
-
   def getAllInvokerStatus() = {
     val connectionContext = HttpConnection.getContext(controllerProtocol)
     val response = Try {
       Http()
-        .singleRequest(
-          HttpRequest(uri = s"$allInvokerStatusUrl"),
-          connectionContext = connectionContext)
+        .singleRequest(HttpRequest(uri = s"$allInvokerStatusUrl"), connectionContext = connectionContext)
         .futureValue
     }.toOption
 
@@ -58,22 +53,16 @@ class ZeroDownTimeDeploymentTests
     val response = RestAssured.given().get(disableUrl)
     response.statusCode shouldBe 200
     // at most 15 seconds later, the invoker0's status will be down
-    retry(
-      {
-        getAllInvokerStatus().get._2 should include("\"invoker0/0\":\"down\"")
-      },
-      3, Some(5000.milliseconds)
-    )
+    retry({
+      getAllInvokerStatus().get._2 should include("\"invoker0/0\":\"down\"")
+    }, 3, Some(5000.milliseconds))
 
     val enableUrl = s"http://$invokerUsername:$invokerPassword@$invokerAddress/enable"
     val response2 = RestAssured.given().get(enableUrl)
     response2.statusCode shouldBe 200
-    retry(
-      {
-        getAllInvokerStatus().get._2 should include("\"invoker0/0\":\"up\"")
-      },
-      5, Some(1000.milliseconds)
-    )
+    retry({
+      getAllInvokerStatus().get._2 should include("\"invoker0/0\":\"up\"")
+    }, 5, Some(1000.milliseconds))
   }
 
 }

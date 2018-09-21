@@ -59,8 +59,7 @@ class WskWebActionsTests extends TestHelpers with WskTestHelpers with RestUtil w
     WhiskProperties.getDBProtocol,
     WhiskProperties.getBaseDBHost,
     WhiskProperties.getDBPort,
-    WhiskProperties.getDatabaseName("activations")
-  )
+    WhiskProperties.getDatabaseName("activations"))
 
   private val regexPattern = new Regex("""_id""")
 
@@ -321,19 +320,22 @@ class WskWebActionsTests extends TestHelpers with WskTestHelpers with RestUtil w
       response.body.asByteArray shouldBe Base64.getDecoder().decode(png)
   }
 
+  it should "save activation while option volatile is false or not passed" in withAssetCleaner(wskprops) {
+    (wp, assetHelper) =>
+      val name = "echo"
+      val file = Some(TestUtils.getTestActionFilename("echo.js"))
+      val host = getServiceURL
+      val url = s"$host$testRoutePath/$namespace/default/$name.json"
 
-  it should "save activation while option volatile is false or not passed" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
-    val name = "echo"
-    val file = Some(TestUtils.getTestActionFilename("echo.js"))
-    val host = getServiceURL
-    val url = s"$host$testRoutePath/$namespace/default/$name.json"
+      assetHelper.withCleaner(wsk.action, name) { (action, _) =>
+        action.create(name, file, web = Some("true"))
+      }
 
-    assetHelper.withCleaner(wsk.action, name) { (action, _) =>
-      action.create(name, file, web = Some("true"))
-    }
-
-    val data = JsObject("selector" -> JsObject{"name" -> JsObject{"$eq" -> JsString(name)}}, "fields" -> JsArray(JsString("_id")), "limit" -> JsNumber(2000))
-    var response = RestAssured
+      val data = JsObject(
+        "selector" -> JsObject { "name" -> JsObject { "$eq" -> JsString(name) } },
+        "fields" -> JsArray(JsString("_id")),
+        "limit" -> JsNumber(2000))
+      var response = RestAssured
         .given()
         .header("content-type", "application/json")
         .body(data.compactPrint)
@@ -341,25 +343,29 @@ class WskWebActionsTests extends TestHelpers with WskTestHelpers with RestUtil w
         .preemptive()
         .basic(dbUsername, dbPassword)
         .post(dbUrl)
-    val countOfActivationsBeforeInvoke = regexPattern.findAllIn(response.asString()).size
+      val countOfActivationsBeforeInvoke = regexPattern.findAllIn(response.asString()).size
 
-    RestAssured
+      RestAssured
         .given()
         .header("content-type", "application/json")
         .config(sslconfig)
         .get(url)
 
-    retry({response = RestAssured
-        .given()
-        .header("content-type", "application/json")
-        .body(data.compactPrint)
-        .auth()
-        .preemptive()
-        .basic(dbUsername, dbPassword)
-        .post(dbUrl)
-        val countOfActivationsAfterInvoke = regexPattern.findAllIn(response.asString()).size
-        countOfActivationsAfterInvoke should be(countOfActivationsBeforeInvoke + 1)
-    }, 10, Some(200.milliseconds))
+      retry(
+        {
+          response = RestAssured
+            .given()
+            .header("content-type", "application/json")
+            .body(data.compactPrint)
+            .auth()
+            .preemptive()
+            .basic(dbUsername, dbPassword)
+            .post(dbUrl)
+          val countOfActivationsAfterInvoke = regexPattern.findAllIn(response.asString()).size
+          countOfActivationsAfterInvoke should be(countOfActivationsBeforeInvoke + 1)
+        },
+        10,
+        Some(200.milliseconds))
   }
 
   it should "not save activation while option volatile is true" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
@@ -372,39 +378,47 @@ class WskWebActionsTests extends TestHelpers with WskTestHelpers with RestUtil w
       action.create(name, file, web = Some("true"))
     }
 
-    val data = JsObject("selector" -> JsObject{"name" -> JsObject{"$eq" -> JsString(name)}}, "fields" -> JsArray(JsString("_id")), "limit" -> JsNumber(2000))
+    val data = JsObject(
+      "selector" -> JsObject { "name" -> JsObject { "$eq" -> JsString(name) } },
+      "fields" -> JsArray(JsString("_id")),
+      "limit" -> JsNumber(2000))
     var response = RestAssured
-        .given()
-        .header("content-type", "application/json")
-        .body(data.compactPrint)
-        .auth()
-        .preemptive()
-        .basic(dbUsername, dbPassword)
-        .post(dbUrl)
+      .given()
+      .header("content-type", "application/json")
+      .body(data.compactPrint)
+      .auth()
+      .preemptive()
+      .basic(dbUsername, dbPassword)
+      .post(dbUrl)
     val countOfActivationsBeforeInvoke = regexPattern.findAllIn(response.asString()).size
 
     RestAssured
-        .given()
-        .header("content-type", "application/json")
-        .config(sslconfig)
-        .get(url)
+      .given()
+      .header("content-type", "application/json")
+      .config(sslconfig)
+      .get(url)
 
-    the[TestFailedException] thrownBy{
-      retry({response = RestAssured
-        .given()
-        .header("content-type", "application/json")
-        .body(data.compactPrint)
-        .auth()
-        .preemptive()
-        .basic(dbUsername, dbPassword)
-        .post(dbUrl)
-        val countOfActivationsAfterInvoke = regexPattern.findAllIn(response.asString()).size
-        countOfActivationsAfterInvoke should be(countOfActivationsBeforeInvoke + 1)
-      }, 2, Some(1000.milliseconds))
+    the[TestFailedException] thrownBy {
+      retry(
+        {
+          response = RestAssured
+            .given()
+            .header("content-type", "application/json")
+            .body(data.compactPrint)
+            .auth()
+            .preemptive()
+            .basic(dbUsername, dbPassword)
+            .post(dbUrl)
+          val countOfActivationsAfterInvoke = regexPattern.findAllIn(response.asString()).size
+          countOfActivationsAfterInvoke should be(countOfActivationsBeforeInvoke + 1)
+        },
+        2,
+        Some(1000.milliseconds))
     } should have message s"$countOfActivationsBeforeInvoke was not equal to ${countOfActivationsBeforeInvoke + 1}"
   }
 
-  it should "save activation while error happens when invoking action even volatile is true" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
+  it should "save activation while error happens when invoking action even volatile is true" in withAssetCleaner(
+    wskprops) { (wp, assetHelper) =>
     val name = "echoError"
     val file = Some(TestUtils.getTestActionFilename("echoError.js"))
     val host = getServiceURL
@@ -414,34 +428,41 @@ class WskWebActionsTests extends TestHelpers with WskTestHelpers with RestUtil w
       action.create(name, file, web = Some("true"))
     }
 
-    val data = JsObject("selector" -> JsObject{"name" -> JsObject{"$eq" -> JsString(name)}}, "fields" -> JsArray(JsString("_id")), "limit" -> JsNumber(2000))
+    val data = JsObject(
+      "selector" -> JsObject { "name" -> JsObject { "$eq" -> JsString(name) } },
+      "fields" -> JsArray(JsString("_id")),
+      "limit" -> JsNumber(2000))
     var response = RestAssured
-        .given()
-        .header("content-type", "application/json")
-        .body(data.compactPrint)
-        .auth()
-        .preemptive()
-        .basic(dbUsername, dbPassword)
-        .post(dbUrl)
+      .given()
+      .header("content-type", "application/json")
+      .body(data.compactPrint)
+      .auth()
+      .preemptive()
+      .basic(dbUsername, dbPassword)
+      .post(dbUrl)
     val countOfActivationsBeforeInvoke = regexPattern.findAllIn(response.asString()).size
 
     RestAssured
-        .given()
-        .header("content-type", "application/json")
-        .config(sslconfig)
-        .get(url)
+      .given()
+      .header("content-type", "application/json")
+      .config(sslconfig)
+      .get(url)
 
-    retry({response = RestAssured
-        .given()
-        .header("content-type", "application/json")
-        .body(data.compactPrint)
-        .auth()
-        .preemptive()
-        .basic(dbUsername, dbPassword)
-        .post(dbUrl)
+    retry(
+      {
+        response = RestAssured
+          .given()
+          .header("content-type", "application/json")
+          .body(data.compactPrint)
+          .auth()
+          .preemptive()
+          .basic(dbUsername, dbPassword)
+          .post(dbUrl)
         val countOfActivationsAfterInvoke = regexPattern.findAllIn(response.asString()).size
         countOfActivationsAfterInvoke should be(countOfActivationsBeforeInvoke + 1)
-    }, 10, Some(200.milliseconds))
+      },
+      10,
+      Some(200.milliseconds))
   }
 
   private val subdomainRegex = Seq.fill(WhiskProperties.getPartsInVanitySubdomain)("[a-zA-Z0-9]+").mkString("-")

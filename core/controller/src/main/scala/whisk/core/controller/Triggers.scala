@@ -163,7 +163,8 @@ trait WhiskTriggersApi extends WhiskCollectionAPI {
                 val args: JsObject = trigger.parameters.merge(payload).getOrElse(JsObject.empty)
 
                 activateRules(user, args, trigger.rules.getOrElse(Map.empty), volatile)
-                  .map(results => triggerActivation.withLogs(ActivationLogs(results.map(_.toJson.compactPrint).toVector)))
+                  .map(results =>
+                    triggerActivation.withLogs(ActivationLogs(results.map(_.toJson.compactPrint).toVector)))
                   .recover {
                     case e =>
                       logging.error(this, s"Failed to write action activation results to trigger activation: $e")
@@ -323,11 +324,11 @@ trait WhiskTriggersApi extends WhiskCollectionAPI {
   /**
    * Iterates through each rule and invoking each active rule's mapped action.
    */
-  private def activateRules(user: Identity,
-                            args: JsObject,
-                            rulesToActivate: Map[FullyQualifiedEntityName, ReducedRule],
-                            volatile: Boolean = false)(
-    implicit transid: TransactionId): Future[Iterable[RuleActivationResult]] = {
+  private def activateRules(
+    user: Identity,
+    args: JsObject,
+    rulesToActivate: Map[FullyQualifiedEntityName, ReducedRule],
+    volatile: Boolean = false)(implicit transid: TransactionId): Future[Iterable[RuleActivationResult]] = {
     val ruleResults = rulesToActivate.map {
       case (ruleName, rule) if (rule.status != Status.ACTIVE) =>
         Future.successful {

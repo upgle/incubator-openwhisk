@@ -252,27 +252,38 @@ object LoggingMarkers {
   private val loadbalancer = "loadbalancer"
   private val containerClient = "containerClient"
 
-
   /*
    * Lambda Log Marker
    */
-  def CONTROLLER_TRIGGER_FIRE(namespace: String) = LogMarkerToken(controller, "triggerFire", count, None, Map("namespace" -> namespace))
-  def CONTROLLER_TRIGGER_FIRE(namespace: String, triggerName: String) = LogMarkerToken(controller, "triggerFire_" + namespace, count, None, Map("name" -> triggerName))
-  def CONTROLLER_ACTION_INVOKE(memory: String, kind: String) = LogMarkerToken(controller, "actionInvoke", count, None, Map("memory" -> memory, "kind" -> kind))
-  def CONTROLLER_ACTION_CREATE(memory: String, kind: String) = LogMarkerToken(controller, "actionCreate", count, None, Map("memory" -> memory, "kind" -> kind))
-  def CONTROLLER_ACTION_UPDATE(memory: String, kind: String) = LogMarkerToken(controller, "actionUpdate", count, None, Map("memory" -> memory, "kind" -> kind))
+  def CONTROLLER_TRIGGER_FIRE(namespace: String) =
+    LogMarkerToken(controller, "triggerFire", count, None, Map("namespace" -> namespace))
+  def CONTROLLER_TRIGGER_FIRE(namespace: String, triggerName: String) =
+    LogMarkerToken(controller, "triggerFire_" + namespace, count, None, Map("name" -> triggerName))
+  def CONTROLLER_ACTION_INVOKE(memory: String, kind: String) =
+    LogMarkerToken(controller, "actionInvoke", count, None, Map("memory" -> memory, "kind" -> kind))
+  def CONTROLLER_ACTION_CREATE(memory: String, kind: String) =
+    LogMarkerToken(controller, "actionCreate", count, None, Map("memory" -> memory, "kind" -> kind))
+  def CONTROLLER_ACTION_UPDATE(memory: String, kind: String) =
+    LogMarkerToken(controller, "actionUpdate", count, None, Map("memory" -> memory, "kind" -> kind))
   def CONTROLLER_ACTION_DELETE = LogMarkerToken(controller, "actionDelete", count)
   def INVOKER_SHAREDPACKAGE(path: String) = LogMarkerToken(invoker, "sharedPackage", count, None, Map("path" -> path))
-  def INVOKER_CONTAINERPOOL(state: String) = LogMarkerToken(invoker, "containerPool", count, Some(state), Map("state" -> state))
+  def INVOKER_CONTAINERPOOL(state: String) =
+    LogMarkerToken(invoker, "containerPool", count, Some(state), Map("state" -> state))
   def INVOKER_RETRY = LogMarkerToken(invoker, "runRetry", count)
   def INVOKER_RUN(namespace: String) = LogMarkerToken(invoker, "run", count, None, Map("namespace" -> namespace))
-  def INVOKER_RUN(namespace: String, action: String) = LogMarkerToken(invoker, "run_" + namespace, count, None, Map("action" -> action))
-  def INVOKER_RUN_INFO(namespace: String, memory: String, kind: String) = LogMarkerToken(invoker, "runInfo_" + namespace, count, None, Map("memory" -> memory, "kind" -> kind))
-  def INVOKER_ACTIVATION_DURATION(namespace: String, memory: String) = LogMarkerToken("invoker", "activation", "duration", None, Map("namespace" -> namespace, "memory" -> memory))
-  def INVOKER_ACTIVATION_ACTION_DURATION(namespace: String, action: String) = LogMarkerToken("invoker", "activation_" + namespace, "duration", None, Map("action" -> action))
+  def INVOKER_RUN(namespace: String, action: String) =
+    LogMarkerToken(invoker, "run_" + namespace, count, None, Map("action" -> action))
+  def INVOKER_RUN_INFO(namespace: String, memory: String, kind: String) =
+    LogMarkerToken(invoker, "runInfo_" + namespace, count, None, Map("memory" -> memory, "kind" -> kind))
+  def INVOKER_ACTIVATION_DURATION(namespace: String, memory: String) =
+    LogMarkerToken("invoker", "activation", "duration", None, Map("namespace" -> namespace, "memory" -> memory))
+  def INVOKER_ACTIVATION_ACTION_DURATION(namespace: String, action: String) =
+    LogMarkerToken("invoker", "activation_" + namespace, "duration", None, Map("action" -> action))
 
-  def INVOKER_ACTIVATION_ERROR(namespace: String) = LogMarkerToken("invoker", "activation", "error", None, Map("namespace" -> namespace))
-  def INVOKER_ACTIVATION_ERROR(namespace: String, action: String) = LogMarkerToken("invoker", "activation_" + namespace, "error", None, Map("action" -> action))
+  def INVOKER_ACTIVATION_ERROR(namespace: String) =
+    LogMarkerToken("invoker", "activation", "error", None, Map("namespace" -> namespace))
+  def INVOKER_ACTIVATION_ERROR(namespace: String, action: String) =
+    LogMarkerToken("invoker", "activation_" + namespace, "error", None, Map("action" -> action))
 
   /*
    * Controller related markers
@@ -321,7 +332,12 @@ object LoggingMarkers {
   def INVOKER_RUNC_CMD(cmd: String) = LogMarkerToken(invoker, "runc", start, Some(cmd), Map("cmd" -> cmd))
   def INVOKER_KUBECTL_CMD(cmd: String) = LogMarkerToken(invoker, "kubectl", start, Some(cmd), Map("cmd" -> cmd))
   def INVOKER_CONTAINER_START(containerState: String, memory: String, kind: String) =
-    LogMarkerToken(invoker, "containerStart", count, Some(containerState), Map("containerState" -> containerState, "memory" -> memory, "kind" -> kind))
+    LogMarkerToken(
+      invoker,
+      "containerStart",
+      count,
+      Some(containerState),
+      Map("containerState" -> containerState, "memory" -> memory, "kind" -> kind))
   val CONTAINER_CLIENT_RETRIES =
     LogMarkerToken(containerClient, "retries", count)
 

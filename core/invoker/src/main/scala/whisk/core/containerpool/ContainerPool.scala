@@ -91,7 +91,8 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
 
     r.msg.transid.mark(
       this,
-      LoggingMarkers.INVOKER_CONTAINER_START(containerState, r.action.limits.memory.megabytes.toString, r.action.exec.kind),
+      LoggingMarkers
+        .INVOKER_CONTAINER_START(containerState, r.action.limits.memory.megabytes.toString, r.action.exec.kind),
       s"containerStart containerState: $containerState action: $actionName namespace: $namespaceName activationId: $activationId",
       akka.event.Logging.InfoLevel)
   }

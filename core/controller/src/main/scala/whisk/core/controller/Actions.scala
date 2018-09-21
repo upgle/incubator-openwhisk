@@ -219,44 +219,46 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
     parameter(
       'blocking ? false,
       'result ? false,
-      'volatile? false,
-      'timeout.as[FiniteDuration] ? WhiskActionsApi.maxWaitForBlockingActivation) { (blocking, result, volatile, waitOverride) =>
-      entity(as[Option[JsObject]]) { payload =>
-        getEntity(WhiskActionMetaData.get(entityStore, entityName.toDocId), Some {
-          act: WhiskActionMetaData =>
-            // resolve the action --- special case for sequences that may contain components with '_' as default package
-            val action = act.resolve(user.namespace)
-            onComplete(entitleReferencedEntitiesMetaData(user, Privilege.ACTIVATE, Some(action.exec))) {
-              case Success(_) =>
-                val actionWithMergedParams = env.map(action.inherit(_)) getOrElse action
+      'volatile ? false,
+      'timeout.as[FiniteDuration] ? WhiskActionsApi.maxWaitForBlockingActivation) {
+      (blocking, result, volatile, waitOverride) =>
+        entity(as[Option[JsObject]]) { payload =>
+          getEntity(WhiskActionMetaData.get(entityStore, entityName.toDocId), Some {
+            act: WhiskActionMetaData =>
+              // resolve the action --- special case for sequences that may contain components with '_' as default package
+              val action = act.resolve(user.namespace)
+              onComplete(entitleReferencedEntitiesMetaData(user, Privilege.ACTIVATE, Some(action.exec))) {
+                case Success(_) =>
+                  val actionWithMergedParams = env.map(action.inherit(_)) getOrElse action
 
-                // incoming parameters may not override final parameters (i.e., parameters with already defined values)
-                // on an action once its parameters are resolved across package and binding
-                val allowInvoke = payload
-                  .map(_.fields.keySet.forall(key => !actionWithMergedParams.immutableParameters.contains(key)))
-                  .getOrElse(true)
+                  // incoming parameters may not override final parameters (i.e., parameters with already defined values)
+                  // on an action once its parameters are resolved across package and binding
+                  val allowInvoke = payload
+                    .map(_.fields.keySet.forall(key => !actionWithMergedParams.immutableParameters.contains(key)))
+                    .getOrElse(true)
 
-                if (allowInvoke) {
-                  doInvoke(user, actionWithMergedParams, payload, blocking, waitOverride, result, volatile)
-                } else {
-                  terminate(BadRequest, Messages.parametersNotAllowed)
-                }
+                  if (allowInvoke) {
+                    doInvoke(user, actionWithMergedParams, payload, blocking, waitOverride, result, volatile)
+                  } else {
+                    terminate(BadRequest, Messages.parametersNotAllowed)
+                  }
 
-              case Failure(f) =>
-                super.handleEntitlementFailure(f)
-            }
-        })
-      }
+                case Failure(f) =>
+                  super.handleEntitlementFailure(f)
+              }
+          })
+        }
     }
   }
 
-  private def doInvoke(user: Identity,
-                       actionWithMergedParams: WhiskActionMetaData,
-                       payload: Option[JsObject],
-                       blocking: Boolean,
-                       waitOverride: FiniteDuration,
-                       result: Boolean,
-                       volatile: Boolean = false)(implicit transid: TransactionId): RequestContext => Future[RouteResult] = {
+  private def doInvoke(
+    user: Identity,
+    actionWithMergedParams: WhiskActionMetaData,
+    payload: Option[JsObject],
+    blocking: Boolean,
+    waitOverride: FiniteDuration,
+    result: Boolean,
+    volatile: Boolean = false)(implicit transid: TransactionId): RequestContext => Future[RouteResult] = {
     val waitForResponse = if (blocking) Some(waitOverride) else None
     onComplete(invokeAction(user, actionWithMergedParams, payload, waitForResponse, cause = None, volatile = volatile)) {
       case Success(Left(activationId)) =>
@@ -407,7 +409,8 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
       case _ => content.parameters getOrElse Parameters()
     }
 
-    MetricEmitter.emitCounterMetric(LoggingMarkers.CONTROLLER_ACTION_CREATE(limits.memory.megabytes.toString, exec.kind))
+    MetricEmitter.emitCounterMetric(
+      LoggingMarkers.CONTROLLER_ACTION_CREATE(limits.memory.megabytes.toString, exec.kind))
 
     WhiskAction(
       entityName.path,
@@ -522,8 +525,9 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
     }
 
     val exec = content.exec getOrElse action.exec
-    
-    MetricEmitter.emitCounterMetric(LoggingMarkers.CONTROLLER_ACTION_UPDATE(limits.memory.megabytes.toString, exec.kind))
+
+    MetricEmitter.emitCounterMetric(
+      LoggingMarkers.CONTROLLER_ACTION_UPDATE(limits.memory.megabytes.toString, exec.kind))
 
     WhiskAction(
       action.namespace,

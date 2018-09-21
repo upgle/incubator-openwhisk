@@ -72,7 +72,9 @@ class RuncClient(timeouts: RuncClientTimeouts = loadConfigOrThrow[RuncClientTime
     executeProcess(cmd, timeout).andThen {
       case Success(_) => {
         val t1 = System.currentTimeMillis()
-        MetricEmitter.emitHistogramMetric(LogMarkerToken("runc", "runCmd", "duration", Some(args.head), Map("cmd" -> args.head)), t1 - t0)
+        MetricEmitter.emitHistogramMetric(
+          LogMarkerToken("runc", "runCmd", "duration", Some(args.head), Map("cmd" -> args.head)),
+          t1 - t0)
         transid.finished(this, start, logLevel = InfoLevel)
       }
       case Failure(t) => transid.failed(this, start, t.getMessage, ErrorLevel)
