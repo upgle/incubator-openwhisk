@@ -48,7 +48,7 @@ class KafkaProducerConnector(kafkahosts: String, id: String = UUIDs.randomUUID()
   /** Sends msg to topic. This is an asynchronous operation. */
   override def send(topic: String, msg: Message, retry: Int = 3): Future[RecordMetadata] = {
     implicit val transid: TransactionId = msg.transid
-    val record = new ProducerRecord[String, String](topic, "messages", msg.serialize)
+    val record = new ProducerRecord[String, String](topic, msg.serialize)
     val produced = Promise[RecordMetadata]()
 
     Future {
