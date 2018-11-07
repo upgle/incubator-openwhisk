@@ -26,12 +26,13 @@ import pureconfig._
 import whisk.common.{CausedBy, Logging}
 import whisk.core.{ConfigKeys, WhiskConfig}
 import whisk.core.connector.{MessageConsumer, MessageProducer, MessagingProvider}
+import whisk.core.entity.ByteSize
 
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
 
-case class KafkaConfig(replicationFactor: Short)
+case class KafkaConfig(replicationFactor: Short, consumerLagCheckInterval: FiniteDuration)
 
 /**
  * A Kafka based implementation of MessagingProvider
@@ -44,13 +45,19 @@ object KafkaMessagingProvider extends MessagingProvider {
     actorSystem: ActorSystem): MessageConsumer =
     new KafkaConsumerConnector(config.kafkaHosts, groupId, topic, maxPeek)
 
-  def getProducer(config: WhiskConfig)(implicit logging: Logging, actorSystem: ActorSystem): MessageProducer =
-    new KafkaProducerConnector(config.kafkaHosts)
+  def getProducer(config: WhiskConfig, maxRequestSize: Option[ByteSize] = None)(
+    implicit logging: Logging,
+    actorSystem: ActorSystem): MessageProducer =
+    new KafkaProducerConnector(config.kafkaHosts, maxRequestSize = maxRequestSize)
 
-  def ensureTopic(config: WhiskConfig, topic: String, topicConfigKey: String)(implicit logging: Logging): Try[Unit] = {
+  def ensureTopic(config: WhiskConfig, topic: String, topicConfigKey: String, maxMessageBytes: Option[ByteSize] = None)(
+    implicit logging: Logging): Try[Unit] = {
     val kafkaConfig = loadConfigOrThrow[KafkaConfig](ConfigKeys.kafka)
     val topicConfig = KafkaConfiguration.configMapToKafkaConfig(
-      loadConfigOrThrow[Map[String, String]](ConfigKeys.kafkaTopics + "." + topicConfigKey))
+      loadConfigOrThrow[Map[String, String]](ConfigKeys.kafkaTopics + "." + topicConfigKey)) ++
+      (maxMessageBytes.map { max =>
+        Map(s"max.message.bytes" -> max.size.toString)
+      } getOrElse Map.empty)
 
     val commonConfig = configMapToKafkaConfig(loadConfigOrThrow[Map[String, String]](ConfigKeys.kafkaCommon))
     val client = AdminClient.create(commonConfig + (AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG -> config.kafkaHosts))
@@ -100,5 +107,25 @@ object KafkaConfiguration {
   /** Converts a Map read from TypesafeConfig to a Map to be read by Kafka clients. */
   def configMapToKafkaConfig(configMap: Map[String, String]): Map[String, String] = configMap.map {
     case (key, value) => configToKafkaKey(key) -> value
+  }
+
+  /**
+   * Prints a warning for each unknown configuration item and returns false if at least one item is unknown.
+   *
+   * @param config the config to be checked
+   * @param validKeys known valid keys to configure
+   * @return true if all configuration keys are known, false if at least one is unknown
+   */
+  def verifyConfig(config: Map[String, String], validKeys: Set[String])(implicit logging: Logging): Boolean = {
+    val passedKeys = config.keySet
+    val knownKeys = validKeys intersect passedKeys
+    val unknownKeys = passedKeys -- knownKeys
+
+    if (unknownKeys.nonEmpty) {
+      logging.warn(this, s"potential misconfiguration, unknown settings: ${unknownKeys.mkString(",")}")
+      false
+    } else {
+      true
+    }
   }
 }

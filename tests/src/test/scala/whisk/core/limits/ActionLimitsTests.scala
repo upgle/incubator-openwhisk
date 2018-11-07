@@ -185,7 +185,7 @@ class ActionLimitsTests extends TestHelpers with WskTestHelpers with WskActorSys
       val run = wsk.action.invoke(name, Map("sleepTimeInMs" -> allowedActionDuration.plus(1 second).toMillis.toJson))
       withActivation(wsk.activation, run) { result =>
         withClue("Activation result not as expected:") {
-          result.response.status shouldBe ActivationResponse.messageForCode(ActivationResponse.ApplicationError)
+          result.response.status shouldBe ActivationResponse.messageForCode(ActivationResponse.DeveloperError)
           result.response.result.get.fields("error") shouldBe {
             Messages.timedoutActivation(allowedActionDuration, init = false).toJson
           }
@@ -248,7 +248,9 @@ class ActionLimitsTests extends TestHelpers with WskTestHelpers with WskActorSys
 
     // Needs some bytes grace since activation message is not only the payload.
     val args = Map("p" -> ("a" * (allowedSize - 750).toInt).toJson)
+    val start = Instant.now
     val rr = wsk.action.invoke(name, args, blocking = true, expectedExitCode = TestUtils.SUCCESS_EXIT)
+    Instant.now.toEpochMilli - start.toEpochMilli should be < 15000L // Ensure activation was not retrieved via DB polling
     val activation = wsk.parseJsonString(rr.respData).convertTo[ActivationResult]
 
     activation.response.success shouldBe true
@@ -272,7 +274,7 @@ class ActionLimitsTests extends TestHelpers with WskTestHelpers with WskActorSys
       def checkResponse(activation: ActivationResult) = {
         val response = activation.response
         response.success shouldBe false
-        response.status shouldBe ActivationResponse.messageForCode(ActivationResponse.ContainerError)
+        response.status shouldBe ActivationResponse.messageForCode(ActivationResponse.DeveloperError)
         val msg = response.result.get.fields(ActivationResponse.ERROR_FIELD).convertTo[String]
         val expected = Messages.truncatedResponse((allowedSize + 10).B, allowedSize.B)
         withClue(s"is: ${msg.take(expected.length)}\nexpected: $expected") {
@@ -284,10 +286,13 @@ class ActionLimitsTests extends TestHelpers with WskTestHelpers with WskActorSys
       // this tests an active ack failure to post from invoker
       val args = Map("size" -> (allowedSize + 1).toJson, "char" -> "a".toJson)
       val code = if (blocking) BadGateway.intValue else TestUtils.ACCEPTED
-      val rr = wsk.action.invoke(name, args, blocking = blocking, expectedExitCode = code)
       if (blocking) {
+        val start = Instant.now
+        val rr = wsk.action.invoke(name, args, blocking = blocking, expectedExitCode = code)
+        Instant.now.toEpochMilli - start.toEpochMilli should be < 15000L // Ensure activation was not retrieved via DB polling
         checkResponse(wsk.parseJsonString(rr.respData).convertTo[ActivationResult])
       } else {
+        val rr = wsk.action.invoke(name, args, blocking = blocking, expectedExitCode = code)
         withActivation(wsk.activation, rr, totalWait = 120 seconds) { checkResponse(_) }
       }
     }
@@ -375,7 +380,7 @@ class ActionLimitsTests extends TestHelpers with WskTestHelpers with WskActorSys
       n.toInt should be >= minExpectedOpenFiles
 
       activation.logs
-        .getOrElse(List())
+        .getOrElse(List.empty)
         .count(_.contains("ERROR: opened files = ")) shouldBe 1
     }
   }
@@ -396,6 +401,22 @@ class ActionLimitsTests extends TestHelpers with WskTestHelpers with WskActorSys
         response.response.status shouldBe "success"
         response.response.result shouldBe Some(JsObject("msg" -> "OK, buffer of size 128 MB has been filled.".toJson))
       }
+    }
+  }
+
+  it should "be able to run a memory intensive actions" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
+    val name = "TestNodeJsInvokeHighMemory"
+    val allowedMemory = MemoryLimit.maxMemory
+    assetHelper.withCleaner(wsk.action, name, confirmDelete = true) {
+      val actionName = TestUtils.getTestActionFilename("memoryWithGC.js")
+      (action, _) =>
+        action.create(name, Some(actionName), memory = Some(allowedMemory))
+    }
+    // Don't try to allocate all the memory on invoking the action, as the maximum memory is set for the whole container
+    // and not only for the user action.
+    val run = wsk.action.invoke(name, Map("payload" -> (allowedMemory.toMB - 56).toJson))
+    withActivation(wsk.activation, run) { response =>
+      response.response.status shouldBe "success"
     }
   }
 

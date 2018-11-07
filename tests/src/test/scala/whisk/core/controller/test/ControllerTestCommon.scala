@@ -33,16 +33,15 @@ import whisk.common.TransactionId
 import whisk.core.WhiskConfig
 import whisk.core.connector.ActivationMessage
 import whisk.core.containerpool.logging.LogStoreProvider
-import whisk.core.controller.RestApiCommons
-import whisk.core.controller.WhiskServices
-import whisk.core.database.DocumentFactory
-import whisk.core.database.CacheChangeNotification
+import whisk.core.controller.{CustomHeaders, RestApiCommons, WhiskServices}
+import whisk.core.database.{ActivationStoreProvider, CacheChangeNotification, DocumentFactory}
 import whisk.core.database.test.DbUtils
 import whisk.core.entitlement._
 import whisk.core.entity._
 import whisk.core.entity.test.ExecHelpers
 import whisk.core.loadBalancer.LoadBalancer
 import whisk.spi.SpiLoader
+import whisk.core.database.UserContext
 
 protected trait ControllerTestCommon
     extends FlatSpec
@@ -53,7 +52,8 @@ protected trait ControllerTestCommon
     with DbUtils
     with ExecHelpers
     with WhiskServices
-    with StreamLogging {
+    with StreamLogging
+    with CustomHeaders {
 
   val activeAckTopicIndex = ControllerInstanceId("0")
 
@@ -87,7 +87,7 @@ protected trait ControllerTestCommon
 
   val entityStore = WhiskEntityStore.datastore()
   val authStore = WhiskAuthStore.datastore()
-  val logStore = SpiLoader.get[LogStoreProvider].logStore(actorSystem)
+  val logStore = SpiLoader.get[LogStoreProvider].instance(actorSystem)
   val activationStore = SpiLoader.get[ActivationStoreProvider].instance(actorSystem, materializer, logging)
 
   def deleteAction(doc: DocId)(implicit transid: TransactionId) = {
@@ -97,32 +97,34 @@ protected trait ControllerTestCommon
     }, dbOpTimeout)
   }
 
-  def getActivation(activationId: ActivationId)(implicit transid: TransactionId,
-                                                timeout: Duration = 10 seconds): WhiskActivation = {
-    Await.result(activationStore.get(activationId), timeout)
+  def getActivation(activationId: ActivationId, context: UserContext)(
+    implicit transid: TransactionId,
+    timeout: Duration = 10 seconds): WhiskActivation = {
+    Await.result(activationStore.get(activationId, context), timeout)
   }
 
-  def storeActivation(activation: WhiskActivation)(implicit transid: TransactionId,
-                                                   timeout: Duration = 10 seconds): DocInfo = {
-    val docFuture = activationStore.store(activation)
+  def storeActivation(activation: WhiskActivation, context: UserContext)(implicit transid: TransactionId,
+                                                                         timeout: Duration = 10 seconds): DocInfo = {
+    val docFuture = activationStore.store(activation, context)
     val doc = Await.result(docFuture, timeout)
     assert(doc != null)
     doc
   }
 
-  def deleteActivation(activationId: ActivationId)(implicit transid: TransactionId) = {
-    val res = Await.result(activationStore.delete(activationId), dbOpTimeout)
+  def deleteActivation(activationId: ActivationId, context: UserContext)(implicit transid: TransactionId) = {
+    val res = Await.result(activationStore.delete(activationId, context), dbOpTimeout)
     assert(res, true)
     res
   }
 
-  def waitOnListActivationsInNamespace(namespace: EntityPath, count: Int)(implicit context: ExecutionContext,
-                                                                          transid: TransactionId,
-                                                                          timeout: Duration) = {
+  def waitOnListActivationsInNamespace(namespace: EntityPath, count: Int, context: UserContext)(
+    implicit ec: ExecutionContext,
+    transid: TransactionId,
+    timeout: Duration) = {
     val success = retry(
       () => {
         val activations: Future[Either[List[JsObject], List[WhiskActivation]]] =
-          activationStore.listActivationsInNamespace(namespace, 0, 0)
+          activationStore.listActivationsInNamespace(namespace, 0, 0, context = context)
         val listFuture: Future[List[JsObject]] = activations map (_.fold((js) => js, (wa) => wa.map(_.toExtendedJson)))
 
         listFuture map { l =>
@@ -136,14 +138,14 @@ protected trait ControllerTestCommon
     assert(success.isSuccess, "wait aborted")
   }
 
-  def waitOnListActivationsMatchingName(namespace: EntityPath, name: EntityPath, count: Int)(
-    implicit context: ExecutionContext,
+  def waitOnListActivationsMatchingName(namespace: EntityPath, name: EntityPath, count: Int, context: UserContext)(
+    implicit ex: ExecutionContext,
     transid: TransactionId,
     timeout: Duration) = {
     val success = retry(
       () => {
         val activations: Future[Either[List[JsObject], List[WhiskActivation]]] =
-          activationStore.listActivationsMatchingName(namespace, name, 0, 0)
+          activationStore.listActivationsMatchingName(namespace, name, 0, 0, context = context)
         val listFuture: Future[List[JsObject]] = activations map (_.fold((js) => js, (wa) => wa.map(_.toExtendedJson)))
 
         listFuture map { l =>

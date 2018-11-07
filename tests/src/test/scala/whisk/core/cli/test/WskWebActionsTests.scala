@@ -204,7 +204,7 @@ class WskWebActionsTests extends TestHelpers with WskTestHelpers with RestUtil w
       response.statusCode shouldBe 200
       response.header("Access-Control-Allow-Origin") shouldBe "*"
       response.header("Access-Control-Allow-Methods") shouldBe "OPTIONS, GET, DELETE, POST, PUT, HEAD, PATCH"
-      response.header("Access-Control-Allow-Headers") shouldBe "Authorization, Content-Type"
+      response.header("Access-Control-Allow-Headers") shouldBe "Authorization, Origin, X-Requested-With, Content-Type, Accept, User-Agent"
       response.header("Location") shouldBe null
       response.header("Set-Cookie") shouldBe null
     }
@@ -265,9 +265,9 @@ class WskWebActionsTests extends TestHelpers with WskTestHelpers with RestUtil w
     new Header("Set-Cookie", "c=d"))
   }
 
-  it should "handle http web action with base64 encoded response" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
-    val name = "base64Web"
-    val file = Some(TestUtils.getTestActionFilename("base64Web.js"))
+  it should "handle http web action returning JSON as string" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
+    val name = "jsonStringWebAction"
+    val file = Some(TestUtils.getTestActionFilename("jsonStringWebAction.js"))
     val host = getServiceURL
     val url = host + s"$testRoutePath/$namespace/default/$name.http"
 

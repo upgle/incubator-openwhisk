@@ -40,7 +40,7 @@ import akka.http.scaladsl.model.headers.`Timeout-Access`
 import akka.http.scaladsl.model.ContentType
 import akka.http.scaladsl.model.ContentTypes
 import akka.http.scaladsl.model.FormData
-import akka.http.scaladsl.model.HttpMethods.{DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT}
+import akka.http.scaladsl.model.HttpMethods.{OPTIONS}
 import akka.http.scaladsl.model.HttpCharsets
 import akka.http.scaladsl.model.HttpResponse
 import spray.json._
@@ -50,12 +50,16 @@ import RestApiCommons.{jsonPrettyResponsePrinter => jsonPrettyPrinter}
 import whisk.common.TransactionId
 import whisk.core.controller.actions.PostActionActivation
 import whisk.core.database._
+import whisk.core.entitlement.{Collection, Privilege, Resource}
 import whisk.core.entity._
 import whisk.core.entity.types._
+import whisk.core.loadBalancer.LoadBalancerException
 import whisk.http.ErrorResponse.terminate
 import whisk.http.Messages
 import whisk.http.LenientSprayJsonSupport._
+import whisk.spi.SpiLoader
 import whisk.utils.JsHelpers._
+import whisk.core.entity.Exec
 
 protected[controller] sealed class WebApiDirectives(prefix: String = "__ow_") {
   // enforce the presence of an extension (e.g., .http) in the URI path
@@ -322,12 +326,14 @@ protected[core] object WhiskWebActionsApi extends Directives {
     findContentTypeInHeader(headers, transid, `text/html`).flatMap { mediaType =>
       val ct = ContentType(mediaType, () => HttpCharsets.`UTF-8`)
       ct match {
-        // base64 encoded json will appear as non-binary but it is excluded here for legacy reasons
-        case nonbinary: ContentType.NonBinary if !isJsonFamily(mediaType) => Success(HttpEntity(nonbinary, str))
+        // TODO: remove this extract check for base64 on json response
+        // this is here for legacy reasons to not brake old webactions returning base64 json that have not migrated yet
+        case nonbinary: ContentType.NonBinary if (isJsonFamily(mediaType) && Exec.isBinaryCode(str)) =>
+          Try(Base64.getDecoder().decode(str)).map(HttpEntity(ct, _))
+        case nonbinary: ContentType.NonBinary => Success(HttpEntity(nonbinary, str))
 
         // because of the default charset provided to the content type constructor
-        // the remaining content types to match against are binary at this point, or
-        // the legacy base64 encoded json
+        // the remaining content types to match against are binary at this point
         case _ /* ContentType.Binary */ => Try(Base64.getDecoder().decode(str)).map(HttpEntity(ct, _))
       }
     } match {
@@ -348,7 +354,12 @@ protected[core] object WhiskWebActionsApi extends Directives {
     headers.filter(_.lowercaseName != `Content-Type`.lowercaseName)
 }
 
-trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostActionActivation {
+trait WhiskWebActionsApi
+    extends Directives
+    with ValidateRequestSize
+    with PostActionActivation
+    with CustomHeaders
+    with CorsSettings.WebActions {
   services: WhiskServices =>
 
   /** API path invocation path for posting activations directly through the host. */
@@ -359,6 +370,12 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
 
   /** Store for identities. */
   protected val authStore: AuthStore
+
+  /** Configured authentication provider. */
+  protected val authenticationProvider = SpiLoader.get[AuthenticationDirectiveProvider]
+
+  /** The collection type for this trait. */
+  protected val collection = Collection(Collection.ACTIONS)
 
   /** The prefix for web invokes e.g., /web. */
   private lazy val webRoutePrefix = {
@@ -372,10 +389,10 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
   private lazy val packagePrefix = pathPrefix("default".r | EntityName.REGEX.r)
 
   private val defaultCorsBaseResponse =
-    List(`Access-Control-Allow-Origin`.*, `Access-Control-Allow-Methods`(OPTIONS, GET, DELETE, POST, PUT, HEAD, PATCH))
+    List(allowOrigin, allowMethods)
 
   private val defaultCorsWithAllowHeader = {
-    defaultCorsBaseResponse :+ `Access-Control-Allow-Headers`(`Authorization`.name, `Content-Type`.name)
+    defaultCorsBaseResponse :+ allowHeaders
   }
 
   private def defaultCorsResponse(headers: Seq[HttpHeader]): List[HttpHeader] = {
@@ -436,28 +453,12 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
   }
 
   /**
-   * Gets package from datastore.
-   * This method is factored out to allow mock testing.
-   */
-  protected def getPackage(pkgName: FullyQualifiedEntityName)(implicit transid: TransactionId): Future[WhiskPackage] = {
-    WhiskPackage.get(entityStore, pkgName.toDocId)
-  }
-
-  /**
-   * Gets action from datastore.
-   * This method is factored out to allow mock testing.
-   */
-  protected def getAction(actionName: FullyQualifiedEntityName)(
-    implicit transid: TransactionId): Future[WhiskActionMetaData] = {
-    WhiskActionMetaData.get(entityStore, actionName.toDocId)
-  }
-
-  /**
    * Gets identity from datastore.
    * This method is factored out to allow mock testing.
    */
   protected def getIdentity(namespace: EntityName)(implicit transid: TransactionId): Future[Identity] = {
-    Identity.get(authStore, namespace)
+    // ask auth provider to create an identity for the given namespace
+    authenticationProvider.identityByNamespace(namespace)(transid, actorSystem, authStore)
   }
 
   private def handleMatch(namespaceSegment: String,
@@ -489,7 +490,7 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
                         this,
                         "web action with require-whisk-auth was invoked without a matching x-require-whisk-auth header value")
                       terminate(Unauthorized)
-                    } else if (!action.annotations.getAs[Boolean]("web-custom-options").exists(identity)) {
+                    } else if (!action.annotations.getAs[Boolean]("web-custom-options").getOrElse(false)) {
                       respondWithHeaders(defaultCorsResponse(context.headers)) {
                         if (context.method == OPTIONS) {
                           complete(OK, HttpEntity.Empty)
@@ -531,27 +532,15 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
    */
   private def verifyWebAction(actionName: FullyQualifiedEntityName, authenticated: Boolean)(
     implicit transid: TransactionId) = {
-    for {
-      // lookup the identity for the action namespace
-      actionOwnerIdentity <- identityLookup(actionName.path.root) flatMap { i =>
-        entitlementProvider.checkThrottles(i) map (_ => i)
-      }
 
-      // lookup the action - since actions are stored relative to package name
-      // the lookup will fail if the package name for the action refers to a binding instead
-      // also merge package and action parameters at the same time
-      // precedence order for parameters:
-      // package.params -> action.params -> query.params -> request.entity (body) -> augment arguments (namespace, path)
-      action <- confirmExportedAction(actionLookup(actionName), authenticated) flatMap { a =>
-        if (a.namespace.defaultPackage) {
-          Future.successful(a)
-        } else {
-          pkgLookup(a.namespace.toFullyQualifiedEntityName) map { pkg =>
-            (a.inherit(pkg.parameters))
-          }
+    // lookup the identity for the action namespace
+    identityLookup(actionName.path.root) flatMap { actionOwnerIdentity =>
+      confirmExportedAction(actionLookup(actionName), authenticated) flatMap { a =>
+        checkEntitlement(actionOwnerIdentity, a) map { _ =>
+          (actionOwnerIdentity, a)
         }
       }
-    } yield (actionOwnerIdentity, action)
+    }
   }
 
   private def extractEntityAndProcessRequest(actionOwnerIdentity: Identity,
@@ -565,7 +554,7 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
       processRequest(actionOwnerIdentity, action, extension, onBehalfOf, context.withBody(body), isRawHttpAction)
     }
 
-    provide(action.annotations.getAs[Boolean]("raw-http").exists(identity)) { isRawHttpAction =>
+    provide(action.annotations.getAs[Boolean]("raw-http").getOrElse(false)) { isRawHttpAction =>
       httpEntity match {
         case Empty =>
           process(None, isRawHttpAction)
@@ -586,7 +575,7 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
           }
 
         case HttpEntity.Strict(contentType, data) =>
-          // application/json is not a binary type in Akka, but is binary in Spray
+          // for legacy, we are encoding application/json still
           if (contentType.mediaType.binary || contentType.mediaType == `application/json`) {
             Try(JsString(Base64.getEncoder.encodeToString(data.toArray))) match {
               case Success(bytes) => process(Some(bytes), isRawHttpAction)
@@ -634,62 +623,51 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
                               responseType: MediaExtension)(implicit transid: TransactionId) = {
     onComplete(queuedActivation) {
       case Success(Right(activation)) =>
-        val result = activation.resultAsJson
+        respondWithActivationIdHeader(activation.activationId) {
+          val result = activation.resultAsJson
 
-        if (activation.response.isSuccess || activation.response.isApplicationError) {
-          val resultPath = if (activation.response.isSuccess) {
-            projectResultField
+          if (activation.response.isSuccess || activation.response.isApplicationError) {
+            val resultPath = if (activation.response.isSuccess) {
+              projectResultField
+            } else {
+              // the activation produced an error response: therefore ignore
+              // the requested projection and unwrap the error instead
+              // and attempt to handle it per the desired response type (extension)
+              List(ActivationResponse.ERROR_FIELD)
+            }
+
+            val result = getFieldPath(activation.resultAsJson, resultPath)
+            result match {
+              case Some(projection) =>
+                val marshaler = Future(responseType.transcoder(projection, transid, webApiDirectives))
+                onComplete(marshaler) {
+                  case Success(done) => done // all transcoders terminate the connection
+                  case Failure(t)    => terminate(InternalServerError)
+                }
+              case _ => terminate(NotFound, Messages.propertyNotFound)
+            }
           } else {
-            // the activation produced an error response: therefore ignore
-            // the requested projection and unwrap the error instead
-            // and attempt to handle it per the desired response type (extension)
-            List(ActivationResponse.ERROR_FIELD)
+            terminate(BadRequest, Messages.errorProcessingRequest)
           }
-
-          val result = getFieldPath(activation.resultAsJson, resultPath)
-          result match {
-            case Some(projection) =>
-              val marshaler = Future(responseType.transcoder(projection, transid, webApiDirectives))
-              onComplete(marshaler) {
-                case Success(done) => done // all transcoders terminate the connection
-                case Failure(t)    => terminate(InternalServerError)
-              }
-            case _ => terminate(NotFound, Messages.propertyNotFound)
-          }
-        } else {
-          terminate(BadRequest, Messages.errorProcessingRequest)
         }
 
       case Success(Left(activationId)) =>
         // blocking invoke which got queued instead
         // this should not happen, instead it should be a blocking invoke timeout
         logging.debug(this, "activation waiting period expired")
-        terminate(Accepted, Messages.responseNotReady)
+        respondWithActivationIdHeader(activationId) {
+          terminate(Accepted, Messages.responseNotReady)
+        }
 
       case Failure(t: RejectRequest) => terminate(t.code, t.message)
+
+      case Failure(t: LoadBalancerException) =>
+        logging.error(this, s"failed in loadbalancer: $t")
+        terminate(ServiceUnavailable)
 
       case Failure(t) =>
         logging.error(this, s"exception in completeRequest: $t")
         terminate(InternalServerError)
-    }
-  }
-
-  /**
-   * Gets package from datastore and confirms it is not a binding.
-   */
-  private def pkgLookup(pkg: FullyQualifiedEntityName)(implicit transid: TransactionId): Future[WhiskPackage] = {
-    getPackage(pkg).filter {
-      _.binding.isEmpty
-    } recoverWith {
-      case _: ArtifactStoreException | DeserializationException(_, _, _) =>
-        // if the package lookup fails or the package doesn't conform to expected invariants,
-        // fail the request with BadRequest so as not to leak information about the existence
-        // of packages that are otherwise private
-        logging.debug(this, s"package which does not exist")
-        Future.failed(RejectRequest(NotFound))
-      case _: NoSuchElementException =>
-        logging.debug(this, s"'$pkg' is a binding")
-        Future.failed(RejectRequest(NotFound))
     }
   }
 
@@ -700,7 +678,7 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
    */
   private def actionLookup(actionName: FullyQualifiedEntityName)(
     implicit transid: TransactionId): Future[WhiskActionMetaData] = {
-    getAction(actionName) recoverWith {
+    WhiskActionMetaData.resolveActionAndMergeParameters(entityStore, actionName) recoverWith {
       case _: ArtifactStoreException | DeserializationException(_, _, _) =>
         Future.failed(RejectRequest(NotFound))
     }
@@ -726,8 +704,8 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
     implicit transid: TransactionId): Future[WhiskActionMetaData] = {
     actionLookup flatMap { action =>
       val requiresAuthenticatedUser =
-        action.annotations.getAs[Boolean](WhiskAction.requireWhiskAuthAnnotation).exists(identity)
-      val isExported = action.annotations.getAs[Boolean]("web-export").exists(identity)
+        action.annotations.getAs[Boolean](WhiskAction.requireWhiskAuthAnnotation).getOrElse(false)
+      val isExported = action.annotations.getAs[Boolean]("web-export").getOrElse(false)
 
       if ((isExported && requiresAuthenticatedUser && authenticated) ||
           (isExported && !requiresAuthenticatedUser)) {
@@ -741,6 +719,17 @@ trait WhiskWebActionsApi extends Directives with ValidateRequestSize with PostAc
         Future.failed(RejectRequest(Unauthorized))
       }
     }
+  }
+
+  /**
+   * Checks if an action is executable.
+   */
+  private def checkEntitlement(identity: Identity, action: WhiskActionMetaData)(
+    implicit transid: TransactionId): Future[Unit] = {
+
+    val fqn = action.fullyQualifiedName(false)
+    val resource = Resource(fqn.path, collection, Some(fqn.name.asString))
+    entitlementProvider.check(identity, Privilege.ACTIVATE, resource)
   }
 
   /**

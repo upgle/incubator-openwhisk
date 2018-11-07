@@ -72,24 +72,51 @@ object ActivationMessage extends DefaultJsonProtocol {
 }
 
 /**
+ * Message that is sent from the invoker to the controller after action is completed or after slot is free again for
+ * new actions.
+ */
+abstract class AcknowledegmentMessage() extends Message {
+  override val transid: TransactionId
+  override def serialize: String = {
+    AcknowledegmentMessage.serdes.write(this).compactPrint
+  }
+}
+
+/**
+ * This message is sent from the invoker to the controller, after the slot of an invoker that has been used by the
+ * current action, is free again (after log collection)
+ */
+case class CompletionMessage(override val transid: TransactionId,
+                             activationId: ActivationId,
+                             isSystemError: Boolean,
+                             invoker: InvokerInstanceId)
+    extends AcknowledegmentMessage() {
+
+  override def toString = {
+    activationId.asString
+  }
+}
+
+object CompletionMessage extends DefaultJsonProtocol {
+  def parse(msg: String): Try[CompletionMessage] = Try(serdes.read(msg.parseJson))
+  implicit val serdes = jsonFormat4(CompletionMessage.apply)
+}
+
+/**
+ * That message will be sent from the invoker to the controller after action completion if the user wants to have
+ * the result immediately (blocking activation).
  * When adding fields, the serdes of the companion object must be updated also.
  * The whisk activation field will have its logs stripped.
  */
-case class CompletionMessage(override val transid: TransactionId,
-                             response: Either[ActivationId, WhiskActivation],
-                             invoker: InvokerInstanceId)
-    extends Message {
-
-  override def serialize: String = {
-    CompletionMessage.serdes.write(this).compactPrint
-  }
+case class ResultMessage(override val transid: TransactionId, response: Either[ActivationId, WhiskActivation])
+    extends AcknowledegmentMessage() {
 
   override def toString = {
     response.fold(l => l, r => r.activationId).asString
   }
 }
 
-object CompletionMessage extends DefaultJsonProtocol {
+object ResultMessage extends DefaultJsonProtocol {
   implicit def eitherResponse =
     new JsonFormat[Either[ActivationId, WhiskActivation]] {
       def write(either: Either[ActivationId, WhiskActivation]) = either match {
@@ -101,12 +128,38 @@ object CompletionMessage extends DefaultJsonProtocol {
         // per the ActivationId's serializer, it is guaranteed to be a String even if it only consists of digits
         case _: JsString => Left(value.convertTo[ActivationId])
         case _: JsObject => Right(value.convertTo[WhiskActivation])
-        case _           => deserializationError("could not read CompletionMessage")
+        case _           => deserializationError("could not read ResultMessage")
       }
     }
 
-  def parse(msg: String): Try[CompletionMessage] = Try(serdes.read(msg.parseJson))
-  private val serdes = jsonFormat3(CompletionMessage.apply)
+  def parse(msg: String): Try[ResultMessage] = Try(serdes.read(msg.parseJson))
+  implicit val serdes = jsonFormat2(ResultMessage.apply)
+}
+
+object AcknowledegmentMessage extends DefaultJsonProtocol {
+  def parse(msg: String): Try[AcknowledegmentMessage] = {
+    Try(serdes.read(msg.parseJson))
+  }
+
+  implicit val serdes = new RootJsonFormat[AcknowledegmentMessage] {
+    override def write(obj: AcknowledegmentMessage): JsValue = {
+      obj match {
+        case c: CompletionMessage => c.toJson
+        case r: ResultMessage     => r.toJson
+      }
+    }
+
+    override def read(json: JsValue): AcknowledegmentMessage = {
+      json.asJsObject
+      // The field invoker is only part of the CompletionMessage. If this field is part of the JSON, we try to convert
+      // it to a CompletionMessage. Otherwise to a ResultMessage.
+      // If both conversions fail, an error will be thrown that needs to be handled.
+        .getFields("invoker")
+        .headOption
+        .map(_ => json.convertTo[CompletionMessage])
+        .getOrElse(json.convertTo[ResultMessage])
+    }
+  }
 }
 
 case class PingMessage(instance: InvokerInstanceId) extends Message {
@@ -147,7 +200,7 @@ case class Activation(name: String,
                       kind: String,
                       conductor: Boolean,
                       memory: Int,
-                      causedBy: Boolean)
+                      causedBy: Option[String])
     extends EventMessageBody {
   val typeName = "Activation"
   override def serialize = toJson.compactPrint
@@ -169,6 +222,30 @@ object Activation extends DefaultJsonProtocol {
       "conductor",
       "memory",
       "causedBy")
+
+  /** Constructs an "Activation" event from a WhiskActivation */
+  def from(a: WhiskActivation): Try[Activation] = {
+    for {
+      // There are no sensible defaults for these fields, so they are required. They should always be there but there is
+      // no static analysis to proof that so we're defensive here.
+      fqn <- a.annotations.getAs[String](WhiskActivation.pathAnnotation)
+      kind <- a.annotations.getAs[String](WhiskActivation.kindAnnotation)
+    } yield {
+      Activation(
+        fqn,
+        a.response.statusCode,
+        a.duration.getOrElse(0),
+        a.annotations.getAs[Long](WhiskActivation.waitTimeAnnotation).getOrElse(0),
+        a.annotations.getAs[Long](WhiskActivation.initTimeAnnotation).getOrElse(0),
+        kind,
+        a.annotations.getAs[Boolean](WhiskActivation.conductorAnnotation).getOrElse(false),
+        a.annotations
+          .getAs[ActionLimits](WhiskActivation.limitsAnnotation)
+          .map(_.memory.megabytes)
+          .getOrElse(0),
+        a.annotations.getAs[String](WhiskActivation.causedByAnnotation).toOption)
+    }
+  }
 }
 
 case class Metric(metricName: String, metricValue: Long) extends EventMessageBody {
@@ -196,6 +273,12 @@ case class EventMessage(source: String,
 object EventMessage extends DefaultJsonProtocol {
   implicit val format =
     jsonFormat(EventMessage.apply _, "source", "body", "subject", "namespace", "userId", "eventType", "timestamp")
+
+  def from(a: WhiskActivation, source: String, userId: UUID): Try[EventMessage] = {
+    Activation.from(a).map { body =>
+      EventMessage(source, body, a.subject, a.namespace.toString, userId, body.typeName)
+    }
+  }
 
   def parse(msg: String) = format.read(msg.parseJson)
 }

@@ -27,15 +27,20 @@ import whisk.common.{Counter, Logging, TransactionId}
 import whisk.connector.kafka.KafkaConfiguration._
 import whisk.core.ConfigKeys
 import whisk.core.connector.{Message, MessageProducer}
-import whisk.core.entity.UUIDs
+import whisk.core.entity.{ByteSize, UUIDs}
+import whisk.utils.Exceptions
 
+import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 import scala.concurrent.{blocking, ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
-class KafkaProducerConnector(kafkahosts: String, id: String = UUIDs.randomUUID().toString)(implicit logging: Logging,
-                                                                                           actorSystem: ActorSystem)
-    extends MessageProducer {
+class KafkaProducerConnector(
+  kafkahosts: String,
+  id: String = UUIDs.randomUUID().toString,
+  maxRequestSize: Option[ByteSize] = None)(implicit logging: Logging, actorSystem: ActorSystem)
+    extends MessageProducer
+    with Exceptions {
 
   implicit val ec: ExecutionContext = actorSystem.dispatcher
   private val gracefulWaitTime = 100.milliseconds
@@ -50,12 +55,17 @@ class KafkaProducerConnector(kafkahosts: String, id: String = UUIDs.randomUUID()
 
     Future {
       blocking {
-        producer.send(record, new Callback {
-          override def onCompletion(metadata: RecordMetadata, exception: Exception): Unit = {
-            if (exception == null) produced.success(metadata)
-            else produced.failure(exception)
-          }
-        })
+        try {
+          producer.send(record, new Callback {
+            override def onCompletion(metadata: RecordMetadata, exception: Exception): Unit = {
+              if (exception == null) produced.trySuccess(metadata)
+              else produced.tryFailure(exception)
+            }
+          })
+        } catch {
+          case e: Throwable =>
+            produced.tryFailure(e)
+        }
       }
     }
 
@@ -94,14 +104,19 @@ class KafkaProducerConnector(kafkahosts: String, id: String = UUIDs.randomUUID()
   private def createProducer(): KafkaProducer[String, String] = {
     val config = Map(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG -> kafkahosts) ++
       configMapToKafkaConfig(loadConfigOrThrow[Map[String, String]](ConfigKeys.kafkaCommon)) ++
-      configMapToKafkaConfig(loadConfigOrThrow[Map[String, String]](ConfigKeys.kafkaProducer))
+      configMapToKafkaConfig(loadConfigOrThrow[Map[String, String]](ConfigKeys.kafkaProducer)) ++
+      (maxRequestSize map { max =>
+        Map("max.request.size" -> max.size.toString)
+      } getOrElse Map.empty)
 
-    new KafkaProducer(config, new StringSerializer, new StringSerializer)
+    verifyConfig(config, ProducerConfig.configNames().asScala.toSet)
+
+    tryAndThrow("creating producer")(new KafkaProducer(config, new StringSerializer, new StringSerializer))
   }
 
   private def recreateProducer(): Unit = {
-    val oldProducer = producer
-    oldProducer.close()
+    logging.info(this, s"recreating producer")
+    tryAndSwallow("closing old producer")(producer.close())
     logging.info(this, s"old producer closed")
     producer = createProducer()
   }

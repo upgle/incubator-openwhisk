@@ -32,12 +32,15 @@ class ColdBlockingInvokeSimulation extends Simulation {
   val host = sys.env("OPENWHISK_HOST")
 
   val users: Int = sys.env("USERS").toInt
+  val codeSize: Int = sys.env.getOrElse("CODE_SIZE", "0").toInt
   val seconds: FiniteDuration = sys.env.getOrElse("SECONDS", "10").toInt.seconds
   val actionsPerUser: Int = sys.env.getOrElse("ACTIONS_PER_USER", "5").toInt
 
   // Specify thresholds
   val requestsPerSec: Int = sys.env("REQUESTS_PER_SEC").toInt
   val minimalRequestsPerSec: Int = sys.env.getOrElse("MIN_REQUESTS_PER_SEC", requestsPerSec.toString).toInt
+  val maxErrorsAllowed: Int = sys.env.getOrElse("MAX_ERRORS_ALLOWED", "0").toInt
+  val maxErrorsAllowedPercentage: Double = sys.env.getOrElse("MAX_ERRORS_ALLOWED_PERCENTAGE", "0.1").toDouble
 
   // Generate the OpenWhiskProtocol
   val openWhiskProtocol: OpenWhiskProtocolBuilder = openWhisk.apiHost(host)
@@ -62,8 +65,7 @@ class ColdBlockingInvokeSimulation extends Simulation {
           openWhisk("Create action")
             .authenticate(uuid, key)
             .action(actionName)
-            .create(FileUtils
-              .readFileToString(Resource.body("nodeJSAction.js").get.file, StandardCharsets.UTF_8)))
+            .create(actionCode))
       }.rendezVous(users)
         // Execute all actions for the given amount of time.
         .during(seconds) {
@@ -79,12 +81,19 @@ class ColdBlockingInvokeSimulation extends Simulation {
         }
     }
 
+  private def actionCode = {
+    val code = FileUtils
+      .readFileToString(Resource.body("nodeJSAction.js").get.file, StandardCharsets.UTF_8)
+    //Pad the code with empty space to increase the stored code size
+    if (codeSize > 0) code + " " * codeSize else code
+  }
+
   setUp(test.inject(atOnceUsers(users)))
     .protocols(openWhiskProtocol)
     // One failure will make the build yellow
     .assertions(details("Invoke action").requestsPerSec.gt(minimalRequestsPerSec))
     .assertions(details("Invoke action").requestsPerSec.gt(requestsPerSec))
     // Mark the build yellow, if there are failed requests. And red if both conditions fail.
-    .assertions(details("Invoke action").failedRequests.count.is(0))
-    .assertions(details("Invoke action").failedRequests.percent.lte(0.1))
+    .assertions(details("Invoke action").failedRequests.count.lte(maxErrorsAllowed))
+    .assertions(details("Invoke action").failedRequests.percent.lte(maxErrorsAllowedPercentage))
 }

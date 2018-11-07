@@ -21,15 +21,15 @@ import java.util.concurrent.ThreadLocalRandom
 
 import akka.actor.ActorSystem
 import akka.event.Logging
-import akka.http.scaladsl.Http
+import akka.http.scaladsl.{Http, HttpConnectionContext}
 import akka.http.scaladsl.model.{HttpRequest, _}
 import akka.http.scaladsl.server.RouteResult.Rejected
 import akka.http.scaladsl.server._
 import akka.http.scaladsl.server.directives._
 import akka.stream.ActorMaterializer
 import spray.json._
+import whisk.common.Https.HttpsConfig
 import whisk.common._
-import whisk.core.WhiskConfig
 
 import scala.collection.immutable.Seq
 import scala.concurrent.duration.DurationInt
@@ -108,7 +108,7 @@ trait BasicHttpService extends Directives {
     extract { req =>
       val tid =
         req.request.headers
-          .find(_.name == TransactionId.generatorConfig.header)
+          .find(_.is(TransactionId.generatorConfig.lowerCaseHeader))
           .map(_.value)
           .filterNot(_.startsWith(TransactionId.systemPrefix))
           .getOrElse {
@@ -163,23 +163,13 @@ trait BasicHttpService extends Directives {
 object BasicHttpService {
 
   /**
-   * Starts an HTTPS route handler on given port and registers a shutdown hook.
+   * Starts an HTTP(S) route handler on given port and registers a shutdown hook.
    */
-  def startHttpsService(route: Route, port: Int, config: WhiskConfig)(implicit actorSystem: ActorSystem,
-                                                                      materializer: ActorMaterializer): Unit = {
-
-    implicit val executionContext = actorSystem.dispatcher
-
-    val httpsBinding = Http().bindAndHandle(route, "0.0.0.0", port, connectionContext = Https.connectionContext(config))
-    addShutdownHook(httpsBinding)
-  }
-
-  /**
-   * Starts an HTTP route handler on given port and registers a shutdown hook.
-   */
-  def startHttpService(route: Route, port: Int)(implicit actorSystem: ActorSystem,
-                                                materializer: ActorMaterializer): Unit = {
-    val httpBinding = Http().bindAndHandle(route, "0.0.0.0", port)
+  def startHttpService(route: Route, port: Int, config: Option[HttpsConfig] = None)(
+    implicit actorSystem: ActorSystem,
+    materializer: ActorMaterializer): Unit = {
+    val connectionContext = config.map(Https.connectionContext(_)).getOrElse(HttpConnectionContext)
+    val httpBinding = Http().bindAndHandle(route, "0.0.0.0", port, connectionContext = connectionContext)
     addShutdownHook(httpBinding)
   }
 
@@ -188,7 +178,6 @@ object BasicHttpService {
     implicit val executionContext = actorSystem.dispatcher
     sys.addShutdownHook {
       Await.result(binding.map(_.unbind()), 30.seconds)
-      actorSystem.terminate()
       Await.result(actorSystem.whenTerminated, 30.seconds)
     }
   }

@@ -36,7 +36,7 @@
   with_items:
         - "{{ controller.ssl.cert }}"
         - "{{ controller.ssl.key }}"
-  when: "{{ controller.protocol == 'https' }}"
+  when: controller.protocol == 'https'
 
 - name: ensure nginx log directory is created with permissions
   file:
@@ -69,3 +69,5 @@
       - "{{ nginx.port.http }}:80"
       - "{{ nginx.port.api }}:443"
       - "{{ nginx.port.adminportal }}:8443"
+    env:
+      TZ: "{{ docker.timezone }}"

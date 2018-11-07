@@ -89,13 +89,13 @@ import scala.util.{Failure, Success}
  *
  * ## Capacity checking
  *
- * The maximum capacity per invoker is configured using `invoker-busy-threshold`, which is the maximum amount of actions
+ * The maximum capacity per invoker is configured using `user-memory`, which is the maximum amount of memory of actions
  * running in parallel on that invoker.
  *
  * Spare capacity is determined by what the loadbalancer thinks it scheduled to each invoker. Upon scheduling, an entry
- * is made to update the books and a slot in a Semaphore is taken. That slot is only released after the response from
- * the invoker (active-ack) arrives **or** after the active-ack times out. The Semaphore has as many slots as are
- * configured via `invoker-busy-threshold`.
+ * is made to update the books and a slot for each MB of the actions memory limit in a Semaphore is taken. These slots
+ * are only released after the response from the invoker (active-ack) arrives **or** after the active-ack times out.
+ * The Semaphore has as many slots as MBs are configured in `user-memory`.
  *
  * Known caveats:
  * - In an overload scenario, activations are queued directly to the invokers, which makes the active-ack timeout
@@ -156,6 +156,8 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
     None
   }
 
+  private val lbConfig = loadConfigOrThrow[ShardingContainerPoolBalancerConfig](ConfigKeys.loadbalancer)
+
   /** State related to invocations and throttling */
   private val activations = TrieMap[ActivationId, ActivationEntry]()
   private val activationsPerNamespace = TrieMap[UUID, LongAdder]()
@@ -163,7 +165,7 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
   private val totalActivationMemory = new LongAdder()
 
   /** State needed for scheduling. */
-  private val schedulingState = ShardingContainerPoolBalancerState()()
+  private val schedulingState = ShardingContainerPoolBalancerState()(lbConfig)
 
   actorSystem.scheduler.schedule(0.seconds, 10.seconds) {
     MetricEmitter.emitHistogramMetric(LOADBALANCER_ACTIVATIONS_INFLIGHT(controllerInstance), totalActivations.longValue)
@@ -230,7 +232,12 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
       val hash = ShardingContainerPoolBalancer.generateHash(msg.user.namespace.name, action.fullyQualifiedName(false))
       val homeInvoker = hash % invokersToUse.size
       val stepSize = stepSizes(hash % stepSizes.size)
-      ShardingContainerPoolBalancer.schedule(invokersToUse, schedulingState.invokerSlots, homeInvoker, stepSize)
+      ShardingContainerPoolBalancer.schedule(
+        invokersToUse,
+        schedulingState.invokerSlots,
+        action.limits.memory.megabytes,
+        homeInvoker,
+        stepSize)
     } else {
       None
     }
@@ -242,7 +249,17 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
           entry.promise.future
         }
       }
-      .getOrElse(Future.failed(LoadBalancerException("No invokers available")))
+      .getOrElse {
+        // report the state of all invokers
+        val actionType = if (!action.exec.pull) "non-blackbox" else "blackbox"
+        val invokerStates = invokersToUse.foldLeft(Map.empty[InvokerState, Int]) { (agg, curr) =>
+          val count = agg.getOrElse(curr.status, 0) + 1
+          agg + (curr.status -> count)
+        }
+
+        logging.error(this, s"failed to schedule $actionType action, invokers to use: $invokerStates")
+        Future.failed(LoadBalancerException("No invokers available"))
+      }
   }
 
   /** 2. Update local state with the to be executed activation */
@@ -254,15 +271,20 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
     totalActivationMemory.add(action.limits.memory.megabytes)
     activationsPerNamespace.getOrElseUpdate(msg.user.namespace.uuid, new LongAdder()).increment()
 
-    val timeout = action.limits.timeout.duration.max(TimeLimit.STD_DURATION) + 1.minute
+    // Timeout is a multiple of the configured maximum action duration. The minimum timeout is the configured standard
+    // value for action durations to avoid too tight timeouts.
+    // Timeouts in general are diluted by a configurable factor. In essence this factor controls how much slack you want
+    // to allow in your topics before you start reporting failed activations.
+    val timeout = (action.limits.timeout.duration.max(TimeLimit.STD_DURATION) * lbConfig.timeoutFactor) + 1.minute
+
     // Install a timeout handler for the catastrophic case where an active ack is not received at all
     // (because say an invoker is down completely, or the connection to the message bus is disrupted) or when
-    // the active ack is significantly delayed (possibly dues to long queues but the subject should not be penalized);
+    // the completion ack is significantly delayed (possibly dues to long queues but the subject should not be penalized);
     // in this case, if the activation handler is still registered, remove it and update the books.
     activations.getOrElseUpdate(
       msg.activationId, {
         val timeoutHandler = actorSystem.scheduler.scheduleOnce(timeout) {
-          processCompletion(Left(msg.activationId), msg.transid, forced = true, invoker = instance)
+          processCompletion(msg.activationId, msg.transid, forced = true, isSystemError = false, invoker = instance)
         }
 
         // please note: timeoutHandler.cancel must be called on all non-timeout paths, e.g. Success
@@ -277,7 +299,7 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
   }
 
   private val messagingProvider = SpiLoader.get[MessagingProvider]
-  private val messageProducer = messagingProvider.getProducer(config)
+  private val messageProducer = messagingProvider.getProducer(config, Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT))
 
   /** 3. Send the activation to the invoker */
   private def sendActivationToInvoker(producer: MessageProducer,
@@ -322,61 +344,105 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
       activeAckConsumer,
       maxActiveAcksPerPoll,
       activeAckPollDuration,
-      processActiveAck)
+      processAcknowledgement)
   })
 
-  /** 4. Get the active-ack message and parse it */
-  private def processActiveAck(bytes: Array[Byte]): Future[Unit] = Future {
+  /** 4. Get the acknowledgement message and parse it */
+  private def processAcknowledgement(bytes: Array[Byte]): Future[Unit] = Future {
     val raw = new String(bytes, StandardCharsets.UTF_8)
-    CompletionMessage.parse(raw) match {
+    AcknowledegmentMessage.parse(raw) match {
       case Success(m: CompletionMessage) =>
-        processCompletion(m.response, m.transid, forced = false, invoker = m.invoker)
+        processCompletion(
+          m.activationId,
+          m.transid,
+          forced = false,
+          isSystemError = m.isSystemError,
+          invoker = m.invoker)
+        activationFeed ! MessageFeed.Processed
+
+      case Success(m: ResultMessage) =>
+        processResult(m.response, m.transid)
         activationFeed ! MessageFeed.Processed
 
       case Failure(t) =>
         activationFeed ! MessageFeed.Processed
-        logging.error(this, s"failed processing message: $raw with $t")
+        logging.error(this, s"failed processing message: $raw")
+
+      case _ =>
+        activationFeed ! MessageFeed.Processed
+        logging.error(this, s"Unexpected Acknowledgment message received by loadbalancer: $raw")
     }
   }
 
-  /** 5. Process the active-ack and update the state accordingly */
-  private def processCompletion(response: Either[ActivationId, WhiskActivation],
-                                tid: TransactionId,
-                                forced: Boolean,
-                                invoker: InvokerInstanceId): Unit = {
+  /** 5. Process the result ack and return it to the user */
+  private def processResult(response: Either[ActivationId, WhiskActivation], tid: TransactionId): Unit = {
     val aid = response.fold(l => l, r => r.activationId)
 
-    // treat left as success (as it is the result of a message exceeding the bus limit)
-    val isSuccess = response.fold(_ => true, r => !r.response.isWhiskError)
+    // Resolve the promise to send the result back to the user
+    // The activation will be removed from `activations`-map later, when we receive the completion message, because the
+    // slot of the invoker is not yet free for new activations.
+    activations.get(aid).map { entry =>
+      entry.promise.trySuccess(response)
+    }
+    logging.info(this, s"received result ack for '$aid'")(tid)
+  }
+
+  /** Process the completion ack and update the state */
+  private def processCompletion(aid: ActivationId,
+                                tid: TransactionId,
+                                forced: Boolean,
+                                isSystemError: Boolean,
+                                invoker: InvokerInstanceId): Unit = {
+
+    val invocationResult = if (forced) {
+      InvocationFinishedResult.Timeout
+    } else {
+      // If the response contains a system error, report that, otherwise report Success
+      // Left generally is considered a Success, since that could be a message not fitting into Kafka
+      if (isSystemError) {
+        InvocationFinishedResult.SystemError
+      } else {
+        InvocationFinishedResult.Success
+      }
+    }
 
     activations.remove(aid) match {
       case Some(entry) =>
         totalActivations.decrement()
         totalActivationMemory.add(entry.memory.toMB * (-1))
         activationsPerNamespace.get(entry.namespaceId).foreach(_.decrement())
-        schedulingState.invokerSlots.lift(invoker.toInt).foreach(_.release())
+        schedulingState.invokerSlots.lift(invoker.toInt).foreach(_.release(entry.memory.toMB.toInt))
 
         if (!forced) {
           entry.timeoutHandler.cancel()
-          entry.promise.trySuccess(response)
+          // If the action was blocking and the Resultmessage has been received before nothing will happen here.
+          // If the action was blocking and the ResultMessage is still missing, we pass the ActivationId. With this Id,
+          // the controller will get the result out of the database.
+          // If the action was non-blocking, we will close the promise here.
+          entry.promise.trySuccess(Left(aid))
         } else {
-          entry.promise.tryFailure(new Throwable("no active ack received"))
+          entry.promise.tryFailure(new Throwable("no completion ack received"))
         }
 
-        logging.info(this, s"${if (!forced) "received" else "forced"} active ack for '$aid'")(tid)
+        logging.info(this, s"${if (!forced) "received" else "forced"} completion ack for '$aid'")(tid)
         // Active acks that are received here are strictly from user actions - health actions are not part of
         // the load balancer's activation map. Inform the invoker pool supervisor of the user action completion.
-        invokerPool ! InvocationFinishedMessage(invoker, isSuccess)
+        invokerPool ! InvocationFinishedMessage(invoker, invocationResult)
+      case None if tid == TransactionId.invokerHealth =>
+        // Health actions do not have an ActivationEntry as they are written on the message bus directly. Their result
+        // is important to pass to the invokerPool because they are used to determine if the invoker can be considered
+        // healthy again.
+        logging.info(this, s"received completion ack for health action on $invoker")(tid)
+        invokerPool ! InvocationFinishedMessage(invoker, invocationResult)
       case None if !forced =>
-        // the entry has already been removed but we receive an active ack for this activation Id.
-        // This happens for health actions, because they don't have an entry in Loadbalancerdata or
-        // for activations that already timed out.
-        invokerPool ! InvocationFinishedMessage(invoker, isSuccess)
-        logging.debug(this, s"received active ack for '$aid' which has no entry")(tid)
+        // Received an active-ack that has already been taken out of the state because of a timeout (forced active-ack).
+        // The result is ignored because a timeout has already been reported to the invokerPool per the force.
+        logging.debug(this, s"received completion ack for '$aid' which has no entry")(tid)
       case None =>
-        // the entry has already been removed by an active ack. This part of the code is reached by the timeout.
-        // As the active ack is already processed we don't have to do anything here.
-        logging.debug(this, s"forced active ack for '$aid' which has no entry")(tid)
+        // The entry has already been removed by an active ack. This part of the code is reached by the timeout and can
+        // happen if active-ack and timeout happen roughly at the same time (the timeout was triggered before the active
+        // ack canceled the timer). As the active ack is already processed we don't have to do anything here.
+        logging.debug(this, s"forced completion ack for '$aid' which has no entry")(tid)
     }
   }
 
@@ -394,7 +460,7 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Con
 
 object ShardingContainerPoolBalancer extends LoadBalancerProvider {
 
-  override def loadBalancer(whiskConfig: WhiskConfig, instance: ControllerInstanceId)(
+  override def instance(whiskConfig: WhiskConfig, instance: ControllerInstanceId)(
     implicit actorSystem: ActorSystem,
     logging: Logging,
     materializer: ActorMaterializer): LoadBalancer = new ShardingContainerPoolBalancer(whiskConfig, instance)
@@ -424,13 +490,15 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
    *
    * @param invokers a list of available invokers to search in, including their state
    * @param dispatched semaphores for each invoker to give the slots away from
+   * @param slots Number of slots, that need to be acquired (e.g. memory in MB)
    * @param index the index to start from (initially should be the "homeInvoker"
    * @param step stable identifier of the entity to be scheduled
    * @return an invoker to schedule to or None of no invoker is available
    */
   @tailrec
   def schedule(invokers: IndexedSeq[InvokerHealth],
-               dispatched: IndexedSeq[ForcableSemaphore],
+               dispatched: IndexedSeq[ForcibleSemaphore],
+               slots: Int,
                index: Int,
                step: Int,
                stepsDone: Int = 0)(implicit logging: Logging, transId: TransactionId): Option[InvokerInstanceId] = {
@@ -439,16 +507,16 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
     if (numInvokers > 0) {
       val invoker = invokers(index)
       // If the current invoker is healthy and we can get a slot
-      if (invoker.status == Healthy && dispatched(invoker.id.toInt).tryAcquire()) {
+      if (invoker.status.isUsable && dispatched(invoker.id.toInt).tryAcquire(slots)) {
         Some(invoker.id)
       } else {
         // If we've gone through all invokers
         if (stepsDone == numInvokers + 1) {
-          val healthyInvokers = invokers.filter(_.status == Healthy)
+          val healthyInvokers = invokers.filter(_.status.isUsable)
           if (healthyInvokers.nonEmpty) {
             // Choose a healthy invoker randomly
             val random = healthyInvokers(ThreadLocalRandom.current().nextInt(healthyInvokers.size)).id
-            dispatched(random.toInt).forceAcquire()
+            dispatched(random.toInt).forceAcquire(slots)
             logging.warn(this, s"system is overloaded. Chose invoker${random.toInt} by random assignment.")
             Some(random)
           } else {
@@ -456,7 +524,7 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
           }
         } else {
           val newIndex = (index + step) % numInvokers
-          schedule(invokers, dispatched, newIndex, step, stepsDone + 1)
+          schedule(invokers, dispatched, slots, newIndex, step, stepsDone + 1)
         }
       }
     } else {
@@ -481,13 +549,10 @@ case class ShardingContainerPoolBalancerState(
   private var _blackboxInvokers: IndexedSeq[InvokerHealth] = IndexedSeq.empty[InvokerHealth],
   private var _managedStepSizes: Seq[Int] = ShardingContainerPoolBalancer.pairwiseCoprimeNumbersUntil(0),
   private var _blackboxStepSizes: Seq[Int] = ShardingContainerPoolBalancer.pairwiseCoprimeNumbersUntil(0),
-  private var _invokerSlots: IndexedSeq[ForcableSemaphore] = IndexedSeq.empty[ForcableSemaphore],
+  private var _invokerSlots: IndexedSeq[ForcibleSemaphore] = IndexedSeq.empty[ForcibleSemaphore],
   private var _clusterSize: Int = 1)(
   lbConfig: ShardingContainerPoolBalancerConfig =
     loadConfigOrThrow[ShardingContainerPoolBalancerConfig](ConfigKeys.loadbalancer))(implicit logging: Logging) {
-
-  private val totalInvokerThreshold = lbConfig.invokerBusyThreshold
-  private var currentInvokerThreshold = totalInvokerThreshold
 
   private val blackboxFraction: Double = Math.max(0.0, Math.min(1.0, lbConfig.blackboxFraction))
   logging.info(this, s"blackboxFraction = $blackboxFraction")(TransactionId.loadbalancer)
@@ -498,8 +563,25 @@ case class ShardingContainerPoolBalancerState(
   def blackboxInvokers: IndexedSeq[InvokerHealth] = _blackboxInvokers
   def managedStepSizes: Seq[Int] = _managedStepSizes
   def blackboxStepSizes: Seq[Int] = _blackboxStepSizes
-  def invokerSlots: IndexedSeq[ForcableSemaphore] = _invokerSlots
+  def invokerSlots: IndexedSeq[ForcibleSemaphore] = _invokerSlots
   def clusterSize: Int = _clusterSize
+
+  /**
+   * @param memory
+   * @return calculated invoker slot
+   */
+  private def getInvokerSlot(memory: ByteSize): ByteSize = {
+    val newTreshold = if (memory / _clusterSize < MemoryLimit.minMemory) {
+      logging.warn(
+        this,
+        s"registered controllers: ${_clusterSize}: the slots per invoker fall below the min memory of one action.")(
+        TransactionId.loadbalancer)
+      MemoryLimit.minMemory
+    } else {
+      memory / _clusterSize
+    }
+    newTreshold
+  }
 
   /**
    * Updates the scheduling state with the new invokers.
@@ -531,8 +613,8 @@ case class ShardingContainerPoolBalancerState(
 
       if (oldSize < newSize) {
         // Keeps the existing state..
-        _invokerSlots = _invokerSlots ++ IndexedSeq.fill(newSize - oldSize) {
-          new ForcableSemaphore(currentInvokerThreshold)
+        _invokerSlots = _invokerSlots ++ _invokers.drop(_invokerSlots.length).map { invoker =>
+          new ForcibleSemaphore(getInvokerSlot(invoker.id.userMemory).toMB.toInt)
         }
       }
     }
@@ -555,14 +637,10 @@ case class ShardingContainerPoolBalancerState(
     val actualSize = newSize max 1 // if a cluster size < 1 is reported, falls back to a size of 1 (alone)
     if (_clusterSize != actualSize) {
       _clusterSize = actualSize
-      val newTreshold = (totalInvokerThreshold / actualSize) max 1 // letting this fall below 1 doesn't make sense
-      currentInvokerThreshold = newTreshold
-      _invokerSlots = _invokerSlots.map(_ => new ForcableSemaphore(currentInvokerThreshold))
-
-      logging.info(
-        this,
-        s"loadbalancer cluster size changed to $actualSize active nodes. invokerThreshold = $currentInvokerThreshold")(
-        TransactionId.loadbalancer)
+      _invokerSlots = _invokers.map { invoker =>
+        new ForcibleSemaphore(getInvokerSlot(invoker.id.userMemory).toMB.toInt)
+      }
+      logging.info(this, s"loadbalancer cluster size changed to $actualSize active nodes.")(TransactionId.loadbalancer)
     }
   }
 }
@@ -578,9 +656,9 @@ case class ClusterConfig(useClusterBootstrap: Boolean)
  * Configuration for the sharding container pool balancer.
  *
  * @param blackboxFraction the fraction of all invokers to use exclusively for blackboxes
- * @param invokerBusyThreshold how many slots an invoker has available in total
+ * @param timeoutFactor factor to influence the timeout period for forced active acks (time-limit.std * timeoutFactor + 1m)
  */
-case class ShardingContainerPoolBalancerConfig(blackboxFraction: Double, invokerBusyThreshold: Int)
+case class ShardingContainerPoolBalancerConfig(blackboxFraction: Double, timeoutFactor: Int)
 
 /**
  * State kept for each activation until completion.

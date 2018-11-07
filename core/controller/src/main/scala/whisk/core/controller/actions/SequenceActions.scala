@@ -17,30 +17,27 @@
 
 package whisk.core.controller.actions
 
-import java.time.Clock
-import java.time.Instant
+import java.time.{Clock, Instant}
 import java.util.concurrent.atomic.AtomicReference
 
-import scala.collection._
-import scala.concurrent.ExecutionContext
-import scala.concurrent.Future
-import scala.concurrent.duration._
-import scala.language.postfixOps
-import scala.util.Failure
-import scala.util.Success
-
 import akka.actor.ActorSystem
-
 import spray.json._
-
-import whisk.common.Logging
-import whisk.common.TransactionId
+import whisk.common.{Logging, TransactionId, UserEvents}
+import whisk.core.connector.{EventMessage, MessagingProvider}
 import whisk.core.controller.WhiskServices
+import whisk.core.database.{ActivationStore, NoDocumentException, UserContext}
 import whisk.core.entity._
 import whisk.core.entity.size.SizeInt
 import whisk.core.entity.types._
 import whisk.http.Messages._
+import whisk.spi.SpiLoader
 import whisk.utils.ExecutionContextFactory.FutureExtensions
+
+import scala.collection._
+import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
+import scala.language.postfixOps
+import scala.util.{Failure, Success}
 
 protected[actions] trait SequenceActions {
   /** The core collections require backend services to be injected in this trait. */
@@ -59,6 +56,13 @@ protected[actions] trait SequenceActions {
 
   /** Database service to get activations. */
   protected val activationStore: ActivationStore
+
+  /** Instace of the controller. This is needed to write user-metrics. */
+  protected val activeAckTopicIndex: ControllerInstanceId
+
+  /** Message producer. This is needed to write user-metrics. */
+  private val messagingProvider = SpiLoader.get[MessagingProvider]
+  private val producer = messagingProvider.getProducer(services.whiskConfig)
 
   /** A method that knows how to invoke a single primitive action. */
   protected[actions] def invokeAction(
@@ -151,6 +155,8 @@ protected[actions] trait SequenceActions {
                                          start: Instant,
                                          cause: Option[ActivationId])(
     implicit transid: TransactionId): Future[(Right[ActivationId, WhiskActivation], Int)] = {
+    val context = UserContext(user)
+
     // not topmost, no need to worry about terminating incoming request
     // Note: the future for the sequence result recovers from all throwable failures
     futureSeqResult
@@ -162,7 +168,14 @@ protected[actions] trait SequenceActions {
         (Right(seqActivation), accounting.atomicActionCnt)
       }
       .andThen {
-        case Success((Right(seqActivation), _)) => activationStore.store(seqActivation)(transid, notifier = None)
+        case Success((Right(seqActivation), _)) =>
+          if (UserEvents.enabled) {
+            EventMessage.from(seqActivation, s"controller${activeAckTopicIndex.asString}", user.namespace.uuid) match {
+              case Success(msg) => UserEvents.send(producer, msg)
+              case Failure(t)   => logging.warn(this, s"activation event was not sent: $t")
+            }
+          }
+          activationStore.store(seqActivation, context)(transid, notifier = None)
 
         // This should never happen; in this case, there is no activation record created or stored:
         // should there be?
@@ -261,14 +274,21 @@ protected[actions] trait SequenceActions {
       .foldLeft(initialAccounting) { (accountingFuture, futureAction) =>
         accountingFuture.flatMap { accounting =>
           if (accounting.atomicActionCnt < actionSequenceLimit) {
-            invokeNextAction(user, futureAction, accounting, cause).flatMap { accounting =>
-              if (!accounting.shortcircuit) {
-                Future.successful(accounting)
-              } else {
-                // this is to short circuit the fold
-                Future.failed(FailedSequenceActivation(accounting)) // terminates the fold
+            invokeNextAction(user, futureAction, accounting, cause)
+              .flatMap { accounting =>
+                if (!accounting.shortcircuit) {
+                  Future.successful(accounting)
+                } else {
+                  // this is to short circuit the fold
+                  Future.failed(FailedSequenceActivation(accounting)) // terminates the fold
+                }
               }
-            }
+              .recoverWith {
+                case _: NoDocumentException =>
+                  val updatedAccount =
+                    accounting.fail(ActivationResponse.applicationError(sequenceComponentNotFound), None)
+                  Future.failed(FailedSequenceActivation(updatedAccount)) // terminates the fold
+              }
           } else {
             val updatedAccount = accounting.fail(ActivationResponse.applicationError(sequenceIsTooLong), None)
             Future.failed(FailedSequenceActivation(updatedAccount)) // terminates the fold

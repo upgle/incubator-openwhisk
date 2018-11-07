@@ -154,7 +154,7 @@ case class TransactionId private (meta: TransactionMetadata) extends AnyVal {
     MetricEmitter.emitCounterMetric(endMarker)
 
     //tracing support
-    WhiskTracerProvider.tracer.error(this)
+    WhiskTracerProvider.tracer.error(this, message)
   }
 
   /**
@@ -245,4 +245,6 @@ object TransactionId {
   }
 }
 
-case class TransactionGeneratorConfig(header: String)
+case class TransactionGeneratorConfig(header: String) {
+  val lowerCaseHeader = header.toLowerCase //to cache the lowercase version of the header name
+}

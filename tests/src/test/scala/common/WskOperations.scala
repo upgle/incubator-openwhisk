@@ -32,7 +32,7 @@ import whisk.core.entity.ByteSize
 import scala.util.Try
 
 case class WskProps(
-  authKey: String = WhiskProperties.readAuthKey(WhiskProperties.getAuthFileForTesting),
+  authKey: String = WhiskProperties.getAuthKeyForTesting,
   cert: String =
     WhiskProperties.getFileRelativeToWhiskHome("ansible/roles/nginx/files/openwhisk-client-cert.pem").getAbsolutePath,
   key: String =
@@ -40,7 +40,8 @@ case class WskProps(
   namespace: String = "_",
   apiversion: String = "v1",
   apihost: String = WhiskProperties.getEdgeHost,
-  token: String = "") {
+  token: String = "",
+  basicAuth: Boolean = true) {
   def overrides = Seq("-i", "--apihost", apihost, "--apiversion", apiversion)
   def writeFile(propsfile: File) = {
     val propsStr = s"""NAMESPACE=$namespace
@@ -231,8 +232,8 @@ trait ActionOperations extends DeleteFromCollectionOperations with ListOrGetFrom
              kind: Option[String] = None,
              main: Option[String] = None,
              docker: Option[String] = None,
-             parameters: Map[String, JsValue] = Map(),
-             annotations: Map[String, JsValue] = Map(),
+             parameters: Map[String, JsValue] = Map.empty,
+             annotations: Map[String, JsValue] = Map.empty,
              parameterFile: Option[String] = None,
              annotationFile: Option[String] = None,
              timeout: Option[Duration] = None,
@@ -245,7 +246,7 @@ trait ActionOperations extends DeleteFromCollectionOperations with ListOrGetFrom
              expectedExitCode: Int = SUCCESS_EXIT)(implicit wp: WskProps): RunResult
 
   def invoke(name: String,
-             parameters: Map[String, JsValue] = Map(),
+             parameters: Map[String, JsValue] = Map.empty,
              parameterFile: Option[String] = None,
              blocking: Boolean = false,
              result: Boolean = false,
@@ -255,8 +256,8 @@ trait ActionOperations extends DeleteFromCollectionOperations with ListOrGetFrom
 trait PackageOperations extends DeleteFromCollectionOperations with ListOrGetFromCollectionOperations {
 
   def create(name: String,
-             parameters: Map[String, JsValue] = Map(),
-             annotations: Map[String, JsValue] = Map(),
+             parameters: Map[String, JsValue] = Map.empty,
+             annotations: Map[String, JsValue] = Map.empty,
              parameterFile: Option[String] = None,
              annotationFile: Option[String] = None,
              shared: Option[Boolean] = None,
@@ -265,16 +266,16 @@ trait PackageOperations extends DeleteFromCollectionOperations with ListOrGetFro
 
   def bind(provider: String,
            name: String,
-           parameters: Map[String, JsValue] = Map(),
-           annotations: Map[String, JsValue] = Map(),
+           parameters: Map[String, JsValue] = Map.empty,
+           annotations: Map[String, JsValue] = Map.empty,
            expectedExitCode: Int = SUCCESS_EXIT)(implicit wp: WskProps): RunResult
 }
 
 trait TriggerOperations extends DeleteFromCollectionOperations with ListOrGetFromCollectionOperations {
 
   def create(name: String,
-             parameters: Map[String, JsValue] = Map(),
-             annotations: Map[String, JsValue] = Map(),
+             parameters: Map[String, JsValue] = Map.empty,
+             annotations: Map[String, JsValue] = Map.empty,
              parameterFile: Option[String] = None,
              annotationFile: Option[String] = None,
              feed: Option[String] = None,
@@ -283,7 +284,7 @@ trait TriggerOperations extends DeleteFromCollectionOperations with ListOrGetFro
              expectedExitCode: Int = SUCCESS_EXIT)(implicit wp: WskProps): RunResult
 
   def fire(name: String,
-           parameters: Map[String, JsValue] = Map(),
+           parameters: Map[String, JsValue] = Map.empty,
            parameterFile: Option[String] = None,
            expectedExitCode: Int = SUCCESS_EXIT)(implicit wp: WskProps): RunResult
 }
@@ -293,7 +294,7 @@ trait RuleOperations extends DeleteFromCollectionOperations with ListOrGetFromCo
   def create(name: String,
              trigger: String,
              action: String,
-             annotations: Map[String, JsValue] = Map(),
+             annotations: Map[String, JsValue] = Map.empty,
              shared: Option[Boolean] = None,
              update: Boolean = false,
              expectedExitCode: Int = SUCCESS_EXIT)(implicit wp: WskProps): RunResult
@@ -313,6 +314,7 @@ trait ActivationOperations {
               entity: Option[String],
               limit: Option[Int] = None,
               since: Option[Instant] = None,
+              skip: Option[Int] = None,
               retries: Int,
               pollPeriod: Duration = 1.second)(implicit wp: WskProps): Seq[String]
 

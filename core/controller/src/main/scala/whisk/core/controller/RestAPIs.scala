@@ -21,7 +21,6 @@ import akka.actor.ActorSystem
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.model.StatusCodes._
 import akka.http.scaladsl.model.Uri
-import akka.http.scaladsl.model.headers._
 import akka.http.scaladsl.server.directives.AuthenticationDirective
 import akka.http.scaladsl.server.{Directives, Route}
 import akka.stream.ActorMaterializer
@@ -30,7 +29,7 @@ import spray.json.DefaultJsonProtocol._
 import spray.json._
 import whisk.common.{Logging, TransactionId}
 import whisk.core.containerpool.logging.LogStore
-import whisk.core.database.CacheChangeNotification
+import whisk.core.database.{ActivationStore, CacheChangeNotification}
 import whisk.core.entitlement._
 import whisk.core.entity.ActivationId.ActivationIdGenerator
 import whisk.core.entity._
@@ -40,7 +39,7 @@ import whisk.core.{ConfigKeys, WhiskConfig}
 import whisk.http.Messages
 import whisk.spi.{Spi, SpiLoader}
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
 /**
@@ -148,10 +147,8 @@ protected[controller] object RestApiCommons {
  * A trait for wrapping routes with headers to include in response.
  * Useful for CORS.
  */
-protected[controller] trait RespondWithHeaders extends Directives {
-  val allowOrigin = `Access-Control-Allow-Origin`.*
-  val allowHeaders = `Access-Control-Allow-Headers`("Authorization", "Content-Type")
-  val sendCorsHeaders = respondWithHeaders(allowOrigin, allowHeaders)
+protected[controller] trait RespondWithHeaders extends Directives with CorsSettings.RestAPIs {
+  val sendCorsHeaders = respondWithHeaders(allowOrigin, allowHeaders, allowMethods)
 }
 
 case class WhiskInformation(buildNo: String, date: String)
@@ -320,7 +317,29 @@ class RestAPIVersion(config: WhiskConfig, apiPath: String, apiVersion: String)(
 }
 
 trait AuthenticationDirectiveProvider extends Spi {
+
+  /**
+   * Returns an authentication directive used to validate the
+   * passed user credentials.
+   * At runtime the directive returns an user identity
+   * which is passed to the following routes.
+   *
+   * @return authentication directive used to verify the user credentials
+   */
   def authenticate(implicit transid: TransactionId,
                    authStore: AuthStore,
                    logging: Logging): AuthenticationDirective[Identity]
+
+  /**
+   * Retrieves an Identity based on a given namespace name.
+   *
+   * For use-cases of anonymous invocation (i.e. WebActions),
+   * we need to an identity based on a given namespace-name to
+   * give the invocation all the context needed.
+   *
+   * @param namespace the namespace that the identity will be based on
+   * @return identity based on the given namespace
+   */
+  def identityByNamespace(
+    namespace: EntityName)(implicit transid: TransactionId, system: ActorSystem, authStore: AuthStore): Future[Identity]
 }

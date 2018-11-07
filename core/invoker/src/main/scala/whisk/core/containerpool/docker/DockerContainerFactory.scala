@@ -58,16 +58,9 @@ class DockerContainerFactory(instance: InvokerInstanceId,
                                userProvidedImage: Boolean,
                                memory: ByteSize,
                                cpuShares: Int)(implicit config: WhiskConfig, logging: Logging): Future[Container] = {
-    val image = if (userProvidedImage) {
-      actionImage.publicImageName
-    } else {
-      actionImage.localImageName(config.runtimesRegistry)
-    }
-
     DockerContainer.create(
       tid,
-      image = image,
-      userProvidedImage = userProvidedImage,
+      image = if (userProvidedImage) Left(actionImage) else Right(actionImage.localImageName(config.runtimesRegistry)),
       memory = memory,
       cpuShares = cpuShares,
       environment = Map("__OW_API_HOST" -> config.wskApiHost),
@@ -133,11 +126,11 @@ class DockerContainerFactory(instance: InvokerInstanceId,
 }
 
 object DockerContainerFactoryProvider extends ContainerFactoryProvider {
-  override def getContainerFactory(actorSystem: ActorSystem,
-                                   logging: Logging,
-                                   config: WhiskConfig,
-                                   instanceId: InvokerInstanceId,
-                                   parameters: Map[String, Set[String]]): ContainerFactory = {
+  override def instance(actorSystem: ActorSystem,
+                        logging: Logging,
+                        config: WhiskConfig,
+                        instanceId: InvokerInstanceId,
+                        parameters: Map[String, Set[String]]): ContainerFactory = {
 
     new DockerContainerFactory(instanceId, parameters)(
       actorSystem,

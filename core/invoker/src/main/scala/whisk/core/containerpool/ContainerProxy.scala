@@ -19,27 +19,26 @@ package whisk.core.containerpool
 
 import java.time.Instant
 
-import scala.concurrent.Future
-import scala.concurrent.duration._
-import scala.util.Success
-import scala.util.Failure
-import akka.actor.FSM
-import akka.actor.Props
-import akka.actor.Stash
 import akka.actor.Status.{Failure => FailureMessage}
+import akka.actor.{FSM, Props, Stash}
+import akka.event.Logging.InfoLevel
 import akka.pattern.pipe
-import spray.json._
+import pureconfig.loadConfigOrThrow
 import spray.json.DefaultJsonProtocol._
+import spray.json._
 import whisk.common.{AkkaLogging, Counter, LoggingMarkers, TransactionId}
+import whisk.core.ConfigKeys
 import whisk.core.connector.ActivationMessage
 import whisk.core.containerpool.logging.LogCollectingException
+import whisk.core.database.UserContext
+import whisk.core.entity.ExecManifest.ImageName
 import whisk.core.entity._
 import whisk.core.entity.size._
-import whisk.core.entity.ExecManifest.ImageName
 import whisk.http.Messages
-import akka.event.Logging.InfoLevel
-import pureconfig.loadConfigOrThrow
-import whisk.core.ConfigKeys
+
+import scala.concurrent.Future
+import scala.concurrent.duration._
+import scala.util.{Failure, Success}
 
 // States
 sealed trait ContainerState
@@ -53,14 +52,16 @@ case object Paused extends ContainerState
 case object Removing extends ContainerState
 
 // Data
-sealed abstract class ContainerData(val lastUsed: Instant)
-case class NoData() extends ContainerData(Instant.EPOCH)
-case class PreWarmedData(container: Container, kind: String, memoryLimit: ByteSize) extends ContainerData(Instant.EPOCH)
+sealed abstract class ContainerData(val lastUsed: Instant, val memoryLimit: ByteSize)
+case class NoData() extends ContainerData(Instant.EPOCH, 0.B)
+case class MemoryData(override val memoryLimit: ByteSize) extends ContainerData(Instant.EPOCH, memoryLimit)
+case class PreWarmedData(container: Container, kind: String, override val memoryLimit: ByteSize)
+    extends ContainerData(Instant.EPOCH, memoryLimit)
 case class WarmedData(container: Container,
                       invocationNamespace: EntityName,
                       action: ExecutableWhiskAction,
                       override val lastUsed: Instant)
-    extends ContainerData(lastUsed)
+    extends ContainerData(lastUsed, action.limits.memory.megabytes.MB)
 
 // Events received by the actor
 case class Start(exec: CodeExec[_], memoryLimit: ByteSize)
@@ -95,8 +96,8 @@ case object RescheduleJob // job is sent back to parent and could not be process
  */
 class ContainerProxy(
   factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int) => Future[Container],
-  sendActiveAck: (TransactionId, WhiskActivation, Boolean, ControllerInstanceId, UUID) => Future[Any],
-  storeActivation: (TransactionId, WhiskActivation) => Future[Any],
+  sendActiveAck: (TransactionId, WhiskActivation, Boolean, ControllerInstanceId, UUID, Boolean) => Future[Any],
+  storeActivation: (TransactionId, WhiskActivation, UserContext) => Future[Any],
   collectLogs: (TransactionId, Identity, WhiskActivation, Container, ExecutableWhiskAction) => Future[ActivationLogs],
   instance: InvokerInstanceId,
   poolConfig: ContainerPoolConfig,
@@ -119,7 +120,7 @@ class ContainerProxy(
         job.exec.image,
         job.exec.pull,
         job.memoryLimit,
-        poolConfig.cpuShare)
+        poolConfig.cpuShare(job.memoryLimit))
         .map(container => PreWarmedData(container, job.exec.kind, job.memoryLimit))
         .pipeTo(self)
 
@@ -136,7 +137,7 @@ class ContainerProxy(
         job.action.exec.image,
         job.action.exec.pull,
         job.action.limits.memory.megabytes.MB,
-        poolConfig.cpuShare)
+        poolConfig.cpuShare(job.action.limits.memory.megabytes.MB))
 
       // container factory will either yield a new container ready to execute the action, or
       // starting up the container failed; for the latter, it's either an internal error starting
@@ -153,9 +154,10 @@ class ContainerProxy(
             // the failure is either the system fault, or for docker actions, the application/developer fault
             val response = t match {
               case WhiskContainerStartupError(msg) => ActivationResponse.whiskError(msg)
-              case BlackboxStartupError(msg)       => ActivationResponse.applicationError(msg)
+              case BlackboxStartupError(msg)       => ActivationResponse.developerError(msg)
               case _                               => ActivationResponse.whiskError(Messages.resourceProvisionError)
             }
+            val context = UserContext(job.msg.user)
             // construct an appropriate activation and record it in the datastore,
             // also update the feed and active ack; the container cleanup is queued
             // implicitly via a FailureMessage which will be processed later when the state
@@ -166,8 +168,9 @@ class ContainerProxy(
               activation,
               job.msg.blocking,
               job.msg.rootControllerIndex,
-              job.msg.user.namespace.uuid)
-            storeActivation(transid, activation)
+              job.msg.user.namespace.uuid,
+              true)
+            storeActivation(transid, activation, context)
         }
         .flatMap { container =>
           // now attempt to inject the user code and run the action
@@ -388,8 +391,12 @@ class ContainerProxy(
       }
 
     // Sending active ack. Entirely asynchronous and not waited upon.
-    activation.foreach(
-      sendActiveAck(tid, _, job.msg.blocking, job.msg.rootControllerIndex, job.msg.user.namespace.uuid))
+    if (job.msg.blocking) {
+      activation.foreach(
+        sendActiveAck(tid, _, job.msg.blocking, job.msg.rootControllerIndex, job.msg.user.namespace.uuid, false))
+    }
+
+    val context = UserContext(job.msg.user)
 
     // Adds logs to the raw activation.
     val activationWithLogs: Future[Either[ActivationLogReadingError, WhiskActivation]] = activation
@@ -414,14 +421,21 @@ class ContainerProxy(
         }
       }
 
-    // Storing the record. Entirely asynchronous and not waited upon.
-    activationWithLogs.map(_.fold(_.activation, identity)).foreach(storeActivation(tid, _))
+    activationWithLogs
+      .map(_.fold(_.activation, identity))
+      .foreach { activation =>
+        // Sending the completionMessage to the controller asynchronously.
+        sendActiveAck(tid, activation, job.msg.blocking, job.msg.rootControllerIndex, job.msg.user.namespace.uuid, true)
+        // Storing the record. Entirely asynchronous and not waited upon.
+        storeActivation(tid, activation, context)
+      }
 
     // Disambiguate activation errors and transform the Either into a failed/successful Future respectively.
     activationWithLogs.flatMap {
-      case Right(act) if !act.response.isSuccess => Future.failed(ActivationUnsuccessfulError(act))
-      case Left(error)                           => Future.failed(error)
-      case Right(act)                            => Future.successful(act)
+      case Right(act) if !act.response.isSuccess && !act.response.isApplicationError =>
+        Future.failed(ActivationUnsuccessfulError(act))
+      case Left(error) => Future.failed(error)
+      case Right(act)  => Future.successful(act)
     }
   }
 }
@@ -431,8 +445,8 @@ final case class ContainerProxyTimeoutConfig(idleContainer: FiniteDuration, paus
 object ContainerProxy {
   def props(
     factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int) => Future[Container],
-    ack: (TransactionId, WhiskActivation, Boolean, ControllerInstanceId, UUID) => Future[Any],
-    store: (TransactionId, WhiskActivation) => Future[Any],
+    ack: (TransactionId, WhiskActivation, Boolean, ControllerInstanceId, UUID, Boolean) => Future[Any],
+    store: (TransactionId, WhiskActivation, UserContext) => Future[Any],
     collectLogs: (TransactionId, Identity, WhiskActivation, Container, ExecutableWhiskAction) => Future[ActivationLogs],
     instance: InvokerInstanceId,
     poolConfig: ContainerPoolConfig,

@@ -17,15 +17,12 @@
 
 package whisk.core.database.test.behavior
 
-import spray.json.DefaultJsonProtocol._
-import spray.json.{JsBoolean, JsObject}
+import spray.json.{JsBoolean, JsObject, JsString}
 import whisk.common.TransactionId
-import whisk.core.database.{NoDocumentException, StaleParameter}
+import whisk.core.database.NoDocumentException
 import whisk.core.entity._
-import whisk.core.entity.types.AuthStore
 import whisk.core.invoker.NamespaceBlacklist
-
-import scala.concurrent.duration.Duration
+import whisk.utils.JsHelpers
 
 trait ArtifactStoreSubjectQueryBehaviors extends ArtifactStoreBehaviorBase {
 
@@ -85,6 +82,36 @@ trait ArtifactStoreSubjectQueryBehaviors extends ArtifactStoreBehaviorBase {
     Identity.get(authStore, ak1).failed.futureValue shouldBe a[NoDocumentException]
   }
 
+  it should "find subject having multiple namespaces" in {
+    implicit val tid: TransactionId = transid()
+    val uuid1 = UUID()
+    val uuid2 = UUID()
+    val ak1 = BasicAuthenticationAuthKey(uuid1, Secret())
+    val ak2 = BasicAuthenticationAuthKey(uuid2, Secret())
+    val ns1 = Namespace(aname(), uuid1)
+    val ns2 = Namespace(aname(), uuid2)
+
+    val auth = WhiskAuth(
+      Subject(ns1.name.name),
+      Set(
+        WhiskNamespace(ns1, BasicAuthenticationAuthKey(ak1.uuid, ak1.key)),
+        WhiskNamespace(ns2, BasicAuthenticationAuthKey(ak2.uuid, ak2.key))))
+
+    put(authStore, auth)
+
+    waitOnView(authStore, BasicAuthenticationAuthKey(ak1.uuid, ak1.key), 1)
+
+    val i1 = Identity.get(authStore, ns1.name).futureValue
+    i1.subject shouldBe auth.subject
+    i1.namespace shouldBe ns1
+
+    //Also check if all results returned match the provided namespace
+    val seq = Identity.list(authStore, List(ns1.name.asString), limit = 100).futureValue
+    seq.foreach { js =>
+      JsHelpers.getFieldPath(js, "value", "namespace").get shouldBe JsString(i1.namespace.name.asString)
+    }
+  }
+
   it should "find subject by namespace with limits" in {
     implicit val tid: TransactionId = transid()
     val uuid1 = UUID()
@@ -138,7 +165,7 @@ trait ArtifactStoreSubjectQueryBehaviors extends ArtifactStoreBehaviorBase {
 
     //2 for limits
     //2 for 2 namespace in user blocked
-    waitOnBlacklistView(authStore, 2 + 2)
+    waitOnView(authStore, 2 + 2, NamespaceBlacklist.view)
 
     //Use contains assertion to ensure that even if same db is used by other setup
     //we at least get our expected entries
@@ -146,35 +173,6 @@ trait ArtifactStoreSubjectQueryBehaviors extends ArtifactStoreBehaviorBase {
     blacklist
       .refreshBlacklist()
       .futureValue should contain allElementsOf Seq(n1, n2, n4, n5).map(_.asString).toSet
-  }
-
-  def waitOnBlacklistView(db: AuthStore, count: Int)(implicit transid: TransactionId, timeout: Duration) = {
-    val success = retry(() => {
-      blacklistCount().map { listCount =>
-        if (listCount != count) {
-          throw RetryOp()
-        } else true
-      }
-    }, timeout)
-    assert(success.isSuccess, "wait aborted after: " + timeout + ": " + success)
-  }
-
-  private def blacklistCount()(implicit transid: TransactionId) = {
-    //NamespaceBlacklist uses StaleParameter.UpdateAfter which would lead to race condition
-    //So use actual call here
-    authStore
-      .query(
-        table = NamespaceBlacklist.view.name,
-        startKey = List.empty,
-        endKey = List.empty,
-        skip = 0,
-        limit = Int.MaxValue,
-        includeDocs = false,
-        descending = true,
-        reduce = false,
-        stale = StaleParameter.No)
-      .map(_.map(_.fields("key").convertTo[String]).toSet)
-      .map(_.size)
   }
 
   private class LimitEntity(name: EntityName, limits: UserLimits) extends WhiskAuth(Subject(), Set.empty) {

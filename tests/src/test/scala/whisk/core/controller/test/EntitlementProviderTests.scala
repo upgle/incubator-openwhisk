@@ -20,17 +20,15 @@ package whisk.core.controller.test
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.Await
 import scala.concurrent.duration.DurationInt
-
 import org.junit.runner.RunWith
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.junit.JUnitRunner
-
 import akka.http.scaladsl.model.StatusCodes._
-
 import whisk.core.controller.RejectRequest
 import whisk.core.entitlement._
 import whisk.core.entitlement.Privilege._
 import whisk.core.entity._
+import whisk.core.entity.ExecManifest.{ImageName, RuntimeManifest}
 import whisk.http.Messages
 
 /**
@@ -54,6 +52,13 @@ class EntitlementProviderTests extends ControllerTestCommon with ScalaFutures {
   val anotherUser = WhiskAuthHelpers.newIdentity()
   val adminUser = WhiskAuthHelpers.newIdentity(Subject("admin"))
   val guestUser = WhiskAuthHelpers.newIdentity(Subject("anonym"))
+
+  val allowedKinds = Set("nodejs:6", "python")
+  val disallowedKinds = Set("golang", "blackbox")
+
+  def getExec(kind: String): Exec = {
+    CodeExecAsString(RuntimeManifest(kind, ImageName(kind ++ "action")), "function main(){}", None)
+  }
 
   it should "authorize a user to only read from their collection" in {
     implicit val tid = transid()
@@ -229,10 +234,10 @@ class EntitlementProviderTests extends ControllerTestCommon with ScalaFutures {
     val one = Resource(someUser.namespace.name.toPath, ACTIONS, Some("xyz"))
     Await.ready(entitlementProvider.check(adminUser, READ, all), requestTimeout).eitherValue.get should not be Right({})
     Await.ready(entitlementProvider.check(adminUser, READ, one), requestTimeout).eitherValue.get should not be Right({})
-    Await.result(entitlementProvider.grant(adminUser.subject, READ, all), requestTimeout) // granted
+    Await.result(entitlementProvider.grant(adminUser, READ, all), requestTimeout) // granted
     Await.ready(entitlementProvider.check(adminUser, READ, all), requestTimeout).eitherValue.get shouldBe Right({})
     Await.ready(entitlementProvider.check(adminUser, READ, one), requestTimeout).eitherValue.get shouldBe Right({})
-    Await.result(entitlementProvider.revoke(adminUser.subject, READ, all), requestTimeout) // revoked
+    Await.result(entitlementProvider.revoke(adminUser, READ, all), requestTimeout) // revoked
   }
 
   it should "grant access to specific resource to a user" in {
@@ -245,14 +250,14 @@ class EntitlementProviderTests extends ControllerTestCommon with ScalaFutures {
       .ready(entitlementProvider.check(adminUser, DELETE, one), requestTimeout)
       .eitherValue
       .get should not be Right({})
-    Await.result(entitlementProvider.grant(adminUser.subject, READ, one), requestTimeout) // granted
+    Await.result(entitlementProvider.grant(adminUser, READ, one), requestTimeout) // granted
     Await.ready(entitlementProvider.check(adminUser, READ, all), requestTimeout).eitherValue.get should not be Right({})
     Await.ready(entitlementProvider.check(adminUser, READ, one), requestTimeout).eitherValue.get shouldBe Right({})
     Await
       .ready(entitlementProvider.check(adminUser, DELETE, one), requestTimeout)
       .eitherValue
       .get should not be Right({})
-    Await.result(entitlementProvider.revoke(adminUser.subject, READ, one), requestTimeout) // revoked
+    Await.result(entitlementProvider.revoke(adminUser, READ, one), requestTimeout) // revoked
   }
 
   behavior of "Package Collection"
@@ -681,4 +686,29 @@ class EntitlementProviderTests extends ControllerTestCommon with ScalaFutures {
         Await.ready(check, requestTimeout).eitherValue.get shouldBe expected
     }
   }
+
+  it should "restrict access to disallowed action kinds for a subject" in {
+    implicit val tid = transid()
+    implicit val ep = entitlementProvider
+    val subject = WhiskAuthHelpers.newIdentity().copy(limits = UserLimits(allowedKinds = Some(allowedKinds)))
+
+    disallowedKinds.foreach(k => {
+      val ex = intercept[RejectRequest] {
+        Await.result(ep.check(subject, Some(getExec(k))), 1.seconds)
+      }
+
+      ex.code shouldBe Forbidden
+      ex.message.get.error shouldBe Messages.notAuthorizedtoActionKind(k)
+    })
+  }
+
+  it should "allow access to whitelisted action kinds for a subject" in {
+    implicit val tid = transid()
+    implicit val ep = entitlementProvider
+    val subject = WhiskAuthHelpers.newIdentity().copy(limits = UserLimits(allowedKinds = Some(allowedKinds)))
+
+    Await.result(ep.check(subject, None), 1.seconds)
+    allowedKinds.foreach(k => Await.result(ep.check(subject, Some(getExec(k))), 1.seconds))
+  }
+
 }

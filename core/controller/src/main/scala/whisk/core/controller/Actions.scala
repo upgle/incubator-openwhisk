@@ -36,8 +36,7 @@ import whisk.common.TransactionId
 import whisk.core.WhiskConfig
 import whisk.core.controller.RestApiCommons.{ListLimit, ListSkip}
 import whisk.core.controller.actions.PostActionActivation
-import whisk.core.database.CacheChangeNotification
-import whisk.core.database.NoDocumentException
+import whisk.core.database.{ActivationStore, CacheChangeNotification, NoDocumentException}
 import whisk.core.entitlement._
 import whisk.core.entity._
 import whisk.core.entity.types.EntityStore
@@ -46,6 +45,7 @@ import whisk.http.Messages
 import whisk.http.Messages._
 import whisk.core.entitlement.Resource
 import whisk.core.entitlement.Collection
+import whisk.core.loadBalancer.LoadBalancerException
 
 /**
  * A singleton object which defines the properties that must be present in a configuration
@@ -187,8 +187,11 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
     parameter('overwrite ? false) { overwrite =>
       entity(as[WhiskActionPut]) { content =>
         val request = content.resolve(user.namespace)
+        val checkAdditionalPrivileges = entitleReferencedEntities(user, Privilege.READ, request.exec).flatMap {
+          case _ => entitlementProvider.check(user, content.exec)
+        }
 
-        onComplete(entitleReferencedEntities(user, Privilege.READ, request.exec)) {
+        onComplete(checkAdditionalPrivileges) {
           case Success(_) =>
             putEntity(WhiskAction, entityStore, entityName.toDocId, overwrite, update(user, request) _, () => {
               make(user, entityName, request)
@@ -256,24 +259,28 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
     onComplete(invokeAction(user, actionWithMergedParams, payload, waitForResponse, cause = None)) {
       case Success(Left(activationId)) =>
         // non-blocking invoke or blocking invoke which got queued instead
-        complete(Accepted, activationId.toJsObject)
+        respondWithActivationIdHeader(activationId) {
+          complete(Accepted, activationId.toJsObject)
+        }
       case Success(Right(activation)) =>
         val response = if (result) activation.resultAsJson else activation.toExtendedJson
 
-        if (activation.response.isSuccess) {
-          complete(OK, response)
-        } else if (activation.response.isApplicationError) {
-          // actions that result is ApplicationError status are considered a 'success'
-          // and will have an 'error' property in the result - the HTTP status is OK
-          // and clients must check the response status if it exists
-          // NOTE: response status will not exist in the JSON object if ?result == true
-          // and instead clients must check if 'error' is in the JSON
-          // PRESERVING OLD BEHAVIOR and will address defect in separate change
-          complete(BadGateway, response)
-        } else if (activation.response.isContainerError) {
-          complete(BadGateway, response)
-        } else {
-          complete(InternalServerError, response)
+        respondWithActivationIdHeader(activation.activationId) {
+          if (activation.response.isSuccess) {
+            complete(OK, response)
+          } else if (activation.response.isApplicationError) {
+            // actions that result is ApplicationError status are considered a 'success'
+            // and will have an 'error' property in the result - the HTTP status is OK
+            // and clients must check the response status if it exists
+            // NOTE: response status will not exist in the JSON object if ?result == true
+            // and instead clients must check if 'error' is in the JSON
+            // PRESERVING OLD BEHAVIOR and will address defect in separate change
+            complete(BadGateway, response)
+          } else if (activation.response.isContainerError) {
+            complete(BadGateway, response)
+          } else {
+            complete(InternalServerError, response)
+          }
         }
       case Failure(t: RecordTooLargeException) =>
         logging.debug(this, s"[POST] action payload was too large")
@@ -281,6 +288,9 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
       case Failure(RejectRequest(code, message)) =>
         logging.debug(this, s"[POST] action rejected with code $code: $message")
         terminate(code, message)
+      case Failure(t: LoadBalancerException) =>
+        logging.error(this, s"[POST] failed in loadbalancer: ${t.getMessage}")
+        terminate(ServiceUnavailable)
       case Failure(t: Throwable) =>
         logging.error(this, s"[POST] action activation failed: ${t.getMessage}")
         terminate(InternalServerError)

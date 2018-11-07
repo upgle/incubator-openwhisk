@@ -19,53 +19,68 @@ package whisk.core.containerpool
 
 import java.time.Instant
 
+import akka.actor.ActorSystem
+import akka.event.Logging.InfoLevel
 import akka.stream.scaladsl.Source
 import akka.util.ByteString
-
-import scala.concurrent.ExecutionContext
-import scala.concurrent.Future
-import scala.concurrent.duration.Duration
-import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.duration._
-import scala.util.Failure
-import scala.util.Success
-import spray.json.JsObject
+import pureconfig._
 import spray.json.DefaultJsonProtocol._
-import whisk.common.Logging
-import whisk.common.LoggingMarkers
-import whisk.common.TransactionId
-import whisk.core.entity.ActivationResponse
-import whisk.core.entity.ActivationResponse.ContainerConnectionError
-import whisk.core.entity.ActivationResponse.ContainerResponse
-import whisk.core.entity.ByteSize
+import spray.json.JsObject
+import whisk.common.{Logging, LoggingMarkers, TransactionId}
+import whisk.core.ConfigKeys
+import whisk.core.entity.ActivationResponse.{ContainerConnectionError, ContainerResponse}
+import whisk.core.entity.{ActivationEntityLimit, ActivationResponse, ByteSize}
 import whisk.core.entity.size._
 import whisk.http.Messages
-import akka.event.Logging.InfoLevel
+
+import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration.{Duration, FiniteDuration, _}
+import scala.util.{Failure, Success}
 
 /**
  * An OpenWhisk biased container abstraction. This is **not only** an abstraction
  * for different container providers, but the implementation also needs to include
  * OpenWhisk specific behavior, especially for initialize and run.
  */
-case class ContainerId(val asString: String) {
+case class ContainerId(asString: String) {
   require(asString.nonEmpty, "ContainerId must not be empty")
 }
-case class ContainerAddress(val host: String, val port: Int = 8080) {
+case class ContainerAddress(host: String, port: Int = 8080) {
   require(host.nonEmpty, "ContainerIp must not be empty")
+}
+
+object Container {
+
+  /**
+   * The action proxies insert this line in the logs at the end of each activation for stdout/stderr.
+   *
+   * Note: Blackbox containers might not add this sentinel, as we cannot be sure the action developer actually does this.
+   */
+  val ACTIVATION_LOG_SENTINEL = "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX"
+
+  protected[containerpool] val config: ContainerPoolConfig =
+    loadConfigOrThrow[ContainerPoolConfig](ConfigKeys.containerPool)
 }
 
 trait Container {
 
+  implicit protected val as: ActorSystem
   protected val id: ContainerId
   protected val addr: ContainerAddress
   protected implicit val logging: Logging
   protected implicit val ec: ExecutionContext
 
   /** HTTP connection to the container, will be lazily established by callContainer */
-  protected var httpConnection: Option[HttpUtils] = None
+  protected var httpConnection: Option[ContainerClient] = None
 
   /** Stops the container from consuming CPU cycles. */
-  def suspend()(implicit transid: TransactionId): Future[Unit]
+  def suspend()(implicit transid: TransactionId): Future[Unit] = {
+    //close connection first, then close connection pool
+    //(testing pool recreation vs connection closing, time was similar - so using the simpler recreation approach)
+    val toClose = httpConnection
+    httpConnection = None
+    closeConnections(toClose)
+  }
 
   /** Dual of halt. */
   def resume()(implicit transid: TransactionId): Future[Unit]
@@ -75,7 +90,7 @@ trait Container {
 
   /** Completely destroys this instance of the container. */
   def destroy()(implicit transid: TransactionId): Future[Unit] = {
-    Future.successful(httpConnection.foreach(_.close()))
+    closeConnections(httpConnection)
   }
 
   /** Initializes code in the container. */
@@ -106,7 +121,7 @@ trait Container {
           Future.failed(
             InitializationError(
               result.interval,
-              ActivationResponse.applicationError(Messages.timedoutActivation(timeout, true))))
+              ActivationResponse.developerError(Messages.timedoutActivation(timeout, true))))
         } else {
           Future.failed(
             InitializationError(
@@ -143,7 +158,7 @@ trait Container {
       }
       .map { result =>
         val response = if (result.interval.duration >= timeout) {
-          ActivationResponse.applicationError(Messages.timedoutActivation(timeout, false))
+          ActivationResponse.developerError(Messages.timedoutActivation(timeout, false))
         } else {
           ActivationResponse.processRunResponseContent(result.response, logging)
         }
@@ -166,16 +181,26 @@ trait Container {
     implicit transid: TransactionId): Future[RunResult] = {
     val started = Instant.now()
     val http = httpConnection.getOrElse {
-      val conn = new HttpUtils(s"${addr.host}:${addr.port}", timeout, 1.MB)
+      val conn = if (Container.config.akkaClient) {
+        new AkkaContainerClient(addr.host, addr.port, timeout, ActivationEntityLimit.MAX_ACTIVATION_ENTITY_LIMIT, 1024)
+      } else {
+        new ApacheBlockingContainerClient(
+          s"${addr.host}:${addr.port}",
+          timeout,
+          ActivationEntityLimit.MAX_ACTIVATION_ENTITY_LIMIT)
+      }
       httpConnection = Some(conn)
       conn
     }
-    Future {
-      http.post(path, body, retry)
-    }.map { response =>
-      val finished = Instant.now()
-      RunResult(Interval(started, finished), response)
-    }
+    http
+      .post(path, body, retry)
+      .map { response =>
+        val finished = Instant.now()
+        RunResult(Interval(started, finished), response)
+      }
+  }
+  private def closeConnections(toClose: Option[ContainerClient]): Future[Unit] = {
+    toClose.map(_.close()).getOrElse(Future.successful(()))
   }
 }
 

@@ -25,11 +25,10 @@ import scala.language.postfixOps
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 
-import akka.http.scaladsl.model.StatusCodes._
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.model.StatusCodes._
-
+import akka.http.scaladsl.model.headers.RawHeader
 import spray.json._
 import spray.json.DefaultJsonProtocol._
 
@@ -41,6 +40,7 @@ import whisk.core.entity.size._
 import whisk.core.entity.test.OldWhiskTrigger
 import whisk.http.ErrorResponse
 import whisk.http.Messages
+import whisk.core.database.UserContext
 
 /**
  * Tests Trigger API.
@@ -61,6 +61,7 @@ class TriggersApiTests extends ControllerTestCommon with WhiskTriggersApi {
   behavior of "Triggers API"
 
   val creds = WhiskAuthHelpers.newIdentity()
+  val context = UserContext(creds)
   val namespace = EntityPath(creds.subject.asString)
   val collectionPath = s"/${EntityPath.DEFAULT}/${collection.path}"
   def aname() = MakeName.next("triggers_tests")
@@ -368,13 +369,14 @@ class TriggersApiTests extends ControllerTestCommon with WhiskTriggersApi {
       val JsString(id) = response.fields("activationId")
       val activationId = ActivationId.parse(id).get
       response.fields("activationId") should not be None
+      headers should contain(RawHeader(ActivationIdHeader, response.fields("activationId").convertTo[String]))
 
       val activationDoc = DocId(WhiskEntity.qualifiedName(namespace, activationId))
       whisk.utils.retry({
         println(s"trying to obtain async activation doc: '${activationDoc}'")
 
-        val activation = getActivation(ActivationId(activationDoc.asString))
-        deleteActivation(ActivationId(activationDoc.asString))
+        val activation = getActivation(ActivationId(activationDoc.asString), context)
+        deleteActivation(ActivationId(activationDoc.asString), context)
         activation.end should be(Instant.EPOCH)
         activation.response.result should be(Some(content))
       }, 30, Some(1.second))
@@ -396,8 +398,9 @@ class TriggersApiTests extends ControllerTestCommon with WhiskTriggersApi {
       val activationDoc = DocId(WhiskEntity.qualifiedName(namespace, activationId))
       whisk.utils.retry({
         println(s"trying to delete async activation doc: '${activationDoc}'")
-        deleteActivation(ActivationId(activationDoc.asString))
+        deleteActivation(ActivationId(activationDoc.asString), context)
         response.fields("activationId") should not be None
+        headers should contain(RawHeader(ActivationIdHeader, response.fields("activationId").convertTo[String]))
       }, 30, Some(1.second))
     }
   }

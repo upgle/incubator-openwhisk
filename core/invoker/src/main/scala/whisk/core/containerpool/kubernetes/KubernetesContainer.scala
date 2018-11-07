@@ -17,25 +17,22 @@
 
 package whisk.core.containerpool.kubernetes
 
+import akka.actor.ActorSystem
 import java.time.Instant
-import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
+import java.util.concurrent.atomic.AtomicReference
 
 import akka.stream.StreamLimitReachedException
 import akka.stream.scaladsl.Framing.FramingException
 import akka.stream.scaladsl.Source
 import akka.util.ByteString
-import spray.json._
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import whisk.common.Logging
 import whisk.common.TransactionId
-import whisk.core.containerpool.Container
-import whisk.core.containerpool.WhiskContainerStartupError
-import whisk.core.containerpool.ContainerId
-import whisk.core.containerpool.ContainerAddress
-import whisk.core.containerpool.docker.{CompleteAfterOccurrences, DockerContainer, OccurrencesNotFoundException}
+import whisk.core.containerpool._
+import whisk.core.containerpool.docker.{CompleteAfterOccurrences, OccurrencesNotFoundException}
 import whisk.core.entity.ByteSize
 import whisk.core.entity.size._
 import whisk.http.Messages
@@ -64,7 +61,9 @@ object KubernetesContainer {
                                                       log: Logging): Future[KubernetesContainer] = {
     implicit val tid = transid
 
-    val podName = name.replace("_", "-").replaceAll("[()]", "").toLowerCase()
+    // Kubernetes naming rule allows maximum length of 63 character and ended with character only.
+    val origName = name.replace("_", "-").replaceAll("[()]", "").toLowerCase.take(63)
+    val podName = if (origName.endsWith("-")) origName.reverse.dropWhile(_ == '-').reverse else origName
 
     for {
       container <- kubernetes.run(podName, image, memory, environment, labels).recoverWith {
@@ -91,6 +90,7 @@ class KubernetesContainer(protected[core] val id: ContainerId,
                           protected[core] val addr: ContainerAddress,
                           protected[core] val workerIP: String,
                           protected[core] val nativeContainerId: String)(implicit kubernetes: KubernetesApi,
+                                                                         override protected val as: ActorSystem,
                                                                          protected val ec: ExecutionContext,
                                                                          protected val logging: Logging)
     extends Container {
@@ -98,45 +98,17 @@ class KubernetesContainer(protected[core] val id: ContainerId,
   /** The last read timestamp in the log file */
   private val lastTimestamp = new AtomicReference[Option[Instant]](None)
 
-  /** The last offset read in the remote log file */
-  private val lastOffset = new AtomicLong(0)
-
   protected val waitForLogs: FiniteDuration = 2.seconds
 
-  def suspend()(implicit transid: TransactionId): Future[Unit] = kubernetes.suspend(this)
+  override def suspend()(implicit transid: TransactionId): Future[Unit] = {
+    super.suspend().flatMap(_ => kubernetes.suspend(this))
+  }
 
   def resume()(implicit transid: TransactionId): Future[Unit] = kubernetes.resume(this)
 
   override def destroy()(implicit transid: TransactionId): Future[Unit] = {
     super.destroy()
     kubernetes.rm(this)
-  }
-
-  private val stringSentinel = DockerContainer.ActivationSentinel.utf8String
-
-  /**
-   * Request that the activation's log output be forwarded to an external log service (implicit in LogProvider choice).
-   * Additional per log line metadata and the activation record is provided to be optionally included
-   * in the forwarded log entry.
-   *
-   * @param sizeLimit The maximum number of bytes of log that should be forwardewd
-   * @param sentinelledLogs Should the log forwarder expect a sentinel line at the end of stdout/stderr streams?
-   * @param additionalMetadata Additional metadata that should be injected into every log line
-   * @param augmentedActivation Activation record to be appended to the forwarded log.
-   */
-  def forwardLogs(sizeLimit: ByteSize,
-                  sentinelledLogs: Boolean,
-                  additionalMetadata: Map[String, JsValue],
-                  augmentedActivation: JsObject)(implicit transid: TransactionId): Future[Unit] = {
-    kubernetes match {
-      case client: KubernetesApiWithInvokerAgent => {
-        client
-          .forwardLogs(this, lastOffset.get, sizeLimit, sentinelledLogs, additionalMetadata, augmentedActivation)
-          .map(newOffset => lastOffset.set(newOffset))
-      }
-      case _ =>
-        Future.failed(new UnsupportedOperationException("forwardLogs requires whisk.kubernetes.invokerAgent.enabled"))
-    }
   }
 
   def logs(limit: ByteSize, waitForSentinel: Boolean)(implicit transid: TransactionId): Source[ByteString, Any] = {
@@ -151,7 +123,7 @@ class KubernetesContainer(protected[core] val id: ContainerId,
         lastTimestamp.set(Option(line.time))
         line
       }
-      .via(new CompleteAfterOccurrences(_.log == stringSentinel, 2, waitForSentinel))
+      .via(new CompleteAfterOccurrences(_.log == Container.ACTIVATION_LOG_SENTINEL, 2, waitForSentinel))
       .recover {
         case _: StreamLimitReachedException =>
           // While the stream has already ended by failing the limitWeighted stage above, we inject a truncation

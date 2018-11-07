@@ -17,39 +17,34 @@
 
 package whisk.core.controller
 
-import scala.concurrent.Await
-import scala.concurrent.duration.DurationInt
-import scala.concurrent.Future
-import scala.util.{Failure, Success}
 import akka.Done
-import akka.actor.ActorSystem
-import akka.actor.CoordinatedShutdown
+import akka.actor.{ActorSystem, CoordinatedShutdown}
+import akka.event.Logging.InfoLevel
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.model.Uri
 import akka.http.scaladsl.server.Route
 import akka.stream.ActorMaterializer
-import spray.json._
-import spray.json.DefaultJsonProtocol._
 import kamon.Kamon
-import whisk.common.AkkaLogging
-import whisk.common.Logging
-import whisk.common.LoggingMarkers
-import whisk.common.TransactionId
+import pureconfig.loadConfigOrThrow
+import spray.json.DefaultJsonProtocol._
+import spray.json._
+import whisk.common.Https.HttpsConfig
+import whisk.common.{AkkaLogging, Logging, LoggingMarkers, TransactionId}
 import whisk.core.WhiskConfig
 import whisk.core.connector.MessagingProvider
-import whisk.core.database.RemoteCacheInvalidation
-import whisk.core.database.CacheChangeNotification
+import whisk.core.containerpool.logging.LogStoreProvider
+import whisk.core.database.{ActivationStoreProvider, CacheChangeNotification, RemoteCacheInvalidation}
 import whisk.core.entitlement._
-import whisk.core.entity._
 import whisk.core.entity.ActivationId.ActivationIdGenerator
 import whisk.core.entity.ExecManifest.Runtimes
-import whisk.core.loadBalancer.{Healthy, LoadBalancerProvider}
-import whisk.http.BasicHttpService
-import whisk.http.BasicRasService
+import whisk.core.entity._
+import whisk.core.loadBalancer.{InvokerState, LoadBalancerProvider}
+import whisk.http.{BasicHttpService, BasicRasService}
 import whisk.spi.SpiLoader
-import whisk.core.containerpool.logging.LogStoreProvider
-import akka.event.Logging.InfoLevel
-import pureconfig.loadConfigOrThrow
+
+import scala.concurrent.duration.DurationInt
+import scala.concurrent.{Await, Future}
+import scala.util.{Failure, Success}
 
 /**
  * The Controller is the service that provides the REST API for OpenWhisk.
@@ -115,13 +110,13 @@ class Controller(val instance: ControllerInstanceId,
 
   // initialize backend services
   private implicit val loadBalancer =
-    SpiLoader.get[LoadBalancerProvider].loadBalancer(whiskConfig, instance)
+    SpiLoader.get[LoadBalancerProvider].instance(whiskConfig, instance)
   logging.info(this, s"loadbalancer initialized: ${loadBalancer.getClass.getSimpleName}")(TransactionId.controller)
 
   private implicit val entitlementProvider =
     SpiLoader.get[EntitlementSpiProvider].instance(whiskConfig, loadBalancer, instance)
   private implicit val activationIdFactory = new ActivationIdGenerator {}
-  private implicit val logStore = SpiLoader.get[LogStoreProvider].logStore(actorSystem)
+  private implicit val logStore = SpiLoader.get[LogStoreProvider].instance(actorSystem)
   private implicit val activationStore =
     SpiLoader.get[ActivationStoreProvider].instance(actorSystem, materializer, logging)
 
@@ -152,7 +147,7 @@ class Controller(val instance: ControllerInstanceId,
         complete {
           loadBalancer
             .invokerHealth()
-            .map(_.count(_.status == Healthy).toJson)
+            .map(_.count(_.status == InvokerState.Healthy).toJson)
         }
       }
     }
@@ -243,13 +238,13 @@ object Controller {
 
     val msgProvider = SpiLoader.get[MessagingProvider]
 
-    Map(
-      "completed" + instance.asString -> "completed",
-      "health" -> "health",
-      "cacheInvalidation" -> "cache-invalidation",
-      "events" -> "events").foreach {
-      case (topic, topicConfigurationKey) =>
-        if (msgProvider.ensureTopic(config, topic, topicConfigurationKey).isFailure) {
+    Seq(
+      ("completed" + instance.asString, "completed", Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT)),
+      ("health", "health", None),
+      ("cacheInvalidation", "cache-invalidation", None),
+      ("events", "events", None)).foreach {
+      case (topic, topicConfigurationKey, maxMessageBytes) =>
+        if (msgProvider.ensureTopic(config, topic, topicConfigurationKey, maxMessageBytes).isFailure) {
           abort(s"failure during msgProvider.ensureTopic for topic $topic")
         }
     }
@@ -263,10 +258,11 @@ object Controller {
           actorSystem,
           ActorMaterializer.create(actorSystem),
           logger)
-        if (Controller.protocol == "https")
-          BasicHttpService.startHttpsService(controller.route, port, config)(actorSystem, controller.materializer)
-        else
-          BasicHttpService.startHttpService(controller.route, port)(actorSystem, controller.materializer)
+
+        val httpsConfig =
+          if (Controller.protocol == "https") Some(loadConfigOrThrow[HttpsConfig]("whisk.controller.https")) else None
+
+        BasicHttpService.startHttpService(controller.route, port, httpsConfig)(actorSystem, controller.materializer)
 
       case Failure(t) =>
         abort(s"Invalid runtimes manifest: $t")

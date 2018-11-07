@@ -80,6 +80,14 @@ $ wskadmin-next user create userA -ns space1
 $ wskadmin-next user create userB -ns space1
 <prints new key specific to userB and space1>
 
+# force update a user with new uuid:key
+$ wskadmin-next user create -f userA
+<prints new UUID and new key>
+
+# revoke auth key of a user and regenerate a new key
+$ wskadmin-next user create -r userA
+<prints old UUID and new key>
+
 # list all users sharing a space
 $ wskadmin-next user list space1 -a
 <key for userA>   userA
@@ -113,8 +121,12 @@ The `wskadmin-next limits` commands allow you set action and trigger throttles p
 $ wskadmin-next limits get space1
 No limits found, default system limits apply
 
-# set limits
-$ wskadmin-next limits set space1 --invocationsPerMinute 1
+# set limits on invocationsPerMinute
+$ wskadmin-next limits set --invocationsPerMinute 1 space1
+Limits successfully set for "space1"
+
+# set limits on allowedKinds
+$ wskadmin-next limits set --allowedKinds nodejs:6 python space1
 Limits successfully set for "space1"
 ```
 

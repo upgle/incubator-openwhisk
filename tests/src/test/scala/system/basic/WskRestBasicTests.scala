@@ -32,6 +32,7 @@ import common.rest.WskRestOperations
 import common.rest.RestResult
 import spray.json._
 import spray.json.DefaultJsonProtocol._
+import whisk.core.containerpool.Container
 import whisk.http.Messages
 
 @RunWith(classOf[JUnitRunner])
@@ -115,7 +116,11 @@ class WskRestBasicTests extends TestHelpers with WskTestHelpers with WskActorSys
     }
 
     wsk.action.create(packageName + "/" + actionName, defaultAction, annotations = actionAnnots)
-    val result = wsk.pkg.get(packageName)
+    val result = cacheRetry({
+      val p = wsk.pkg.get(packageName)
+      p.getFieldListJsObject("actions") should have size 1
+      p
+    })
     val ns = wsk.namespace.whois()
     wsk.action.delete(packageName + "/" + actionName)
 
@@ -289,13 +294,13 @@ class WskRestBasicTests extends TestHelpers with WskTestHelpers with WskActorSys
           action.create(name, Some(TestUtils.getTestActionFilename("blackbox.zip")), kind = Some("native"))
       }
 
-      val run = wsk.action.invoke(name, Map())
+      val run = wsk.action.invoke(name, Map.empty)
       withActivation(wsk.activation, run) { activation =>
         activation.response.result shouldBe Some(JsObject("msg" -> "hello zip".toJson))
         activation.logs shouldBe defined
         val logs = activation.logs.get.toString
         logs should include("This is an example zip used with the docker skeleton action.")
-        logs should not include ("XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX")
+        logs should not include Container.ACTIVATION_LOG_SENTINEL
       }
   }
 
@@ -554,7 +559,7 @@ class WskRestBasicTests extends TestHelpers with WskTestHelpers with WskActorSys
       logs shouldBe expectedLogs
     }
 
-    val runWithNoParams = wsk.trigger.fire(triggerName, Map())
+    val runWithNoParams = wsk.trigger.fire(triggerName, Map.empty)
     withActivation(wsk.activation, runWithNoParams) { activation =>
       activation.response.result shouldBe Some(JsObject.empty)
       activation.duration shouldBe 0L // shouldn't exist but CLI generates it

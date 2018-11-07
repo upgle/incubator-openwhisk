@@ -41,8 +41,7 @@ class WskConductorTests extends TestHelpers with WskTestHelpers with JsHelpers w
   val invalid = "invalid#Action"
   val missing = "missingAction"
 
-  val whiskConfig = new WhiskConfig(Map(WhiskConfig.actionSequenceMaxLimit -> null))
-  assert(whiskConfig.isValid)
+  val whiskConfig = new WhiskConfig(Map(WhiskConfig.actionSequenceMaxLimit -> "50"))
   val limit = whiskConfig.actionSequenceLimit.toInt
 
   behavior of "Whisk conductor actions"
@@ -105,7 +104,7 @@ class WskConductorTests extends TestHelpers with WskTestHelpers with JsHelpers w
         activation.response.status shouldBe "application error"
         activation.response.result.get.fields.get("error") shouldBe Some(
           JsString(compositionComponentInvalid(JsString(invalid))))
-        checkConductorLogsAndAnnotations(activation, 1) // echo
+        checkConductorLogsAndAnnotations(activation, 2) // echo
       }
 
       // an undefined action
@@ -116,7 +115,7 @@ class WskConductorTests extends TestHelpers with WskTestHelpers with JsHelpers w
         activation.response.status shouldBe "application error"
         activation.response.result.get.fields.get("error") shouldBe Some(
           JsString(compositionComponentNotFound(s"$namespace/$missing")))
-        checkConductorLogsAndAnnotations(activation, 1) // echo
+        checkConductorLogsAndAnnotations(activation, 2) // echo
       }
   }
 

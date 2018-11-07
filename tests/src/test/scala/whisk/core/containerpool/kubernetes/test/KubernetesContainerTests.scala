@@ -50,7 +50,6 @@ import whisk.core.entity.ActivationResponse.Timeout
 import whisk.core.entity.size._
 import whisk.http.Messages
 import whisk.core.containerpool.docker.test.DockerContainerTests._
-import whisk.core.containerpool.kubernetes.test.KubernetesClientTests.TestKubernetesClientWithInvokerAgent
 
 import scala.collection.{immutable, mutable}
 
@@ -174,7 +173,7 @@ class KubernetesContainerTests
         env: Map[String, String] = Map.empty,
         labels: Map[String, String] = Map.empty)(implicit transid: TransactionId): Future[KubernetesContainer] = {
         runs += ((name, image, env, labels))
-        Future.failed(ProcessRunningException(1, "", ""))
+        Future.failed(ProcessUnsuccessfulException(ExitStatus(1), "", ""))
       }
     }
 
@@ -242,7 +241,7 @@ class KubernetesContainerTests
 
     val error = the[InitializationError] thrownBy await(init, initTimeout)
     error.interval shouldBe interval
-    error.response.statusCode shouldBe ActivationResponse.ApplicationError
+    error.response.statusCode shouldBe ActivationResponse.DeveloperError
 
     // assert the finish log is there
     val end = LogMarker.parse(logLines.last)
@@ -288,32 +287,12 @@ class KubernetesContainerTests
     }
 
     val runResult = container.run(JsObject.empty, JsObject.empty, runTimeout)
-    await(runResult) shouldBe (interval, ActivationResponse.applicationError(
+    await(runResult) shouldBe (interval, ActivationResponse.developerError(
       Messages.timedoutActivation(runTimeout, false)))
 
     // assert the finish log is there
     val end = LogMarker.parse(logLines.last)
     end.token shouldBe INVOKER_ACTIVATION_RUN.asFinish
-  }
-
-  /*
-   * LOG FORWARDING
-   */
-  it should "container should maintain lastOffset across calls to forwardLogs" in {
-    implicit val kubernetes = new TestKubernetesClientWithInvokerAgent
-    val id = ContainerId("id")
-    val container = new KubernetesContainer(id, ContainerAddress("ip"), "127.0.0.1", "docker://foo")
-    val logChunk = 10.kilobytes
-
-    await(container.forwardLogs(logChunk, false, Map.empty, JsObject.empty))
-    await(container.forwardLogs(42.bytes, false, Map.empty, JsObject.empty))
-    await(container.forwardLogs(logChunk, false, Map.empty, JsObject.empty))
-    await(container.forwardLogs(42.bytes, false, Map.empty, JsObject.empty))
-
-    kubernetes.forwardLogs(0) shouldBe (id, 0)
-    kubernetes.forwardLogs(1) shouldBe (id, logChunk.toBytes)
-    kubernetes.forwardLogs(2) shouldBe (id, logChunk.toBytes + 42)
-    kubernetes.forwardLogs(3) shouldBe (id, 2 * logChunk.toBytes + 42)
   }
 
   /*
@@ -521,8 +500,8 @@ object KubernetesContainerTests {
     if (appendSentinel) {
       val lastTime = log.lastOption.map { case TypedLogLine(time, _, _) => time }.getOrElse(Instant.EPOCH)
       log :+
-        TypedLogLine(lastTime, "stderr", s"${DockerContainer.ActivationSentinel.utf8String}") :+
-        TypedLogLine(lastTime, "stdout", s"${DockerContainer.ActivationSentinel.utf8String}")
+        TypedLogLine(lastTime, "stderr", s"${Container.ACTIVATION_LOG_SENTINEL}") :+
+        TypedLogLine(lastTime, "stdout", s"${Container.ACTIVATION_LOG_SENTINEL}")
     } else {
       log
     }

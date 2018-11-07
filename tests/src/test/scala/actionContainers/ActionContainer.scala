@@ -35,6 +35,7 @@ import scala.util.{Failure, Success}
 import org.apache.commons.lang3.StringUtils
 import org.scalatest.{FlatSpec, Matchers}
 import akka.actor.ActorSystem
+
 import scala.concurrent.ExecutionContext
 import spray.json._
 import common.StreamLogging
@@ -42,6 +43,7 @@ import whisk.common.Logging
 import whisk.common.TransactionId
 import whisk.core.entity.Exec
 import common.WhiskProperties
+import whisk.core.containerpool.Container
 
 /**
  * For testing convenience, this interface abstracts away the REST calls to a
@@ -64,7 +66,7 @@ trait ActionProxyContainerTestUtils extends FlatSpec with Matchers with StreamLo
         "binary" -> JsBoolean(Exec.isBinaryCode(code))))
 
   def runPayload(args: JsValue, other: Option[JsObject] = None): JsObject =
-    JsObject(Map("value" -> args) ++ (other map { _.fields } getOrElse Map()))
+    JsObject(Map("value" -> args) ++ (other map { _.fields } getOrElse Map.empty))
 
   def checkStreams(out: String,
                    err: String,
@@ -91,7 +93,7 @@ object ActionContainer {
     }.get // This fails if the docker binary couldn't be located.
   }
 
-  private lazy val dockerCmd: String = {
+  lazy val dockerCmd: String = {
     /*
      * The docker host is set to a provided property 'docker.host' if it's
      * available; otherwise we check with WhiskProperties to see whether we are
@@ -167,8 +169,8 @@ object ActionContainer {
     Await.result(proc(docker(cmd)), t)
   }
 
-  // Filters out the sentinel markers inserted by the container (see relevant private code in Invoker.scala)
-  val sentinel = "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX"
+  // Filters out the sentinel markers inserted by the container (see relevant private code in Invoker)
+  val sentinel = Container.ACTIVATION_LOG_SENTINEL
   def filterSentinel(str: String): String = str.replaceAll(sentinel, "").trim
 
   def withContainer(imageName: String, environment: Map[String, String] = Map.empty)(
@@ -229,18 +231,21 @@ object ActionContainer {
   }
 
   private def syncPost(host: String, port: Int, endPoint: String, content: JsValue)(
-    implicit logging: Logging): (Int, Option[JsObject]) = {
+    implicit logging: Logging,
+    as: ActorSystem): (Int, Option[JsObject]) = {
 
     implicit val transid = TransactionId.testing
 
-    whisk.core.containerpool.HttpUtils.post(host, port, endPoint, content)
+    whisk.core.containerpool.AkkaContainerClient.post(host, port, endPoint, content, 30.seconds)
   }
   private def concurrentSyncPost(host: String, port: Int, endPoint: String, contents: Seq[JsValue])(
     implicit logging: Logging,
-    ec: ExecutionContext): Seq[(Int, Option[JsObject])] = {
+    ec: ExecutionContext,
+    as: ActorSystem): Seq[(Int, Option[JsObject])] = {
 
     implicit val transid = TransactionId.testing
 
-    whisk.core.containerpool.HttpUtils.concurrentPost(host, port, endPoint, contents, 30.seconds)
+    whisk.core.containerpool.AkkaContainerClient.concurrentPost(host, port, endPoint, contents, 30.seconds)
   }
+
 }

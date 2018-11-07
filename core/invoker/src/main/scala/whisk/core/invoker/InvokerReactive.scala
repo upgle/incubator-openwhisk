@@ -28,19 +28,20 @@ import pureconfig._
 import spray.json._
 import whisk.common.tracing.WhiskTracerProvider
 import whisk.common._
-import whisk.core.{ConfigKeys, WhiskConfig}
 import whisk.core.connector._
 import whisk.core.containerpool._
 import whisk.core.containerpool.logging.LogStoreProvider
 import whisk.core.database._
 import whisk.core.entity._
+import whisk.core.entity.size._
+import whisk.core.{ConfigKeys, WhiskConfig}
 import whisk.http.Messages
 import whisk.spi.SpiLoader
+import whisk.core.database.UserContext
 
-import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
-import DefaultJsonProtocol._
 
 class InvokerReactive(
   config: WhiskConfig,
@@ -54,7 +55,7 @@ class InvokerReactive(
   implicit val ec: ExecutionContext = actorSystem.dispatcher
   implicit val cfg: WhiskConfig = config
 
-  private val logsProvider = SpiLoader.get[LogStoreProvider].logStore(actorSystem)
+  private val logsProvider = SpiLoader.get[LogStoreProvider].instance(actorSystem)
   logging.info(this, s"LogStoreProvider: ${logsProvider.getClass}")
 
   /**
@@ -67,7 +68,7 @@ class InvokerReactive(
   private val containerFactory =
     SpiLoader
       .get[ContainerFactoryProvider]
-      .getContainerFactory(
+      .instance(
         actorSystem,
         logging,
         config,
@@ -98,7 +99,7 @@ class InvokerReactive(
 
   /** Initialize message consumers */
   private val topic = s"invoker${instance.toInt}"
-  private val maximumContainers = poolConfig.maxActiveContainers
+  private val maximumContainers = (poolConfig.userMemory / MemoryLimit.minMemory).toInt
   private val msgProvider = SpiLoader.get[MessagingProvider]
   private val consumer = msgProvider.getConsumer(
     config,
@@ -108,7 +109,7 @@ class InvokerReactive(
     maxPollInterval = TimeLimit.MAX_DURATION + 1.minute)
 
   private val activationFeed = actorSystem.actorOf(Props {
-    new MessageFeed("activation", logging, consumer, maximumContainers, 500.milliseconds, processActivationMessage)
+    new MessageFeed("activation", logging, consumer, maximumContainers, 1.second, processActivationMessage)
   })
 
   /** Sends an active-ack. */
@@ -116,11 +117,19 @@ class InvokerReactive(
                      activationResult: WhiskActivation,
                      blockingInvoke: Boolean,
                      controllerInstance: ControllerInstanceId,
-                     userId: UUID) => {
+                     userId: UUID,
+                     isSlotFree: Boolean) => {
     implicit val transid: TransactionId = tid
 
     def send(res: Either[ActivationId, WhiskActivation], recovery: Boolean = false) = {
-      val msg = CompletionMessage(transid, res, instance)
+      val msg = if (isSlotFree) {
+        val aid = res.fold(identity, _.activationId)
+        val isWhiskSystemError = res.fold(_ => false, _.response.isWhiskError)
+        CompletionMessage(transid, aid, isWhiskSystemError, instance)
+      } else {
+        ResultMessage(transid, res)
+      }
+
       producer.send(topic = "completed" + controllerInstance.asString, msg).andThen {
         case Success(_) =>
           logging.info(
@@ -128,30 +137,14 @@ class InvokerReactive(
             s"posted ${if (recovery) "recovery" else "completion"} of activation ${activationResult.activationId}")
       }
     }
-    // Potentially sends activation metadata to kafka if user events are enabled
-    UserEvents.send(
-      producer, {
-        val activation = Activation(
-          activationResult.namespace + EntityPath.PATHSEP + activationResult.name,
-          activationResult.response.statusCode,
-          activationResult.duration.getOrElse(0),
-          activationResult.annotations.getAs[Long](WhiskActivation.waitTimeAnnotation).getOrElse(0),
-          activationResult.annotations.getAs[Long](WhiskActivation.initTimeAnnotation).getOrElse(0),
-          activationResult.annotations.getAs[String](WhiskActivation.kindAnnotation).getOrElse("unknown_kind"),
-          activationResult.annotations.getAs[Boolean](WhiskActivation.conductorAnnotation).getOrElse(false),
-          activationResult.annotations
-            .getAs[ActionLimits](WhiskActivation.limitsAnnotation)
-            .map(al => al.memory.megabytes)
-            .getOrElse(0),
-          activationResult.annotations.getAs[Boolean](WhiskActivation.causedByAnnotation).getOrElse(false))
-        EventMessage(
-          s"invoker${instance.instance}",
-          activation,
-          activationResult.subject,
-          activationResult.namespace.toString,
-          userId,
-          activation.typeName)
-      })
+
+    // UserMetrics are sent, when the slot is free again. This ensures, that all metrics are sent.
+    if (UserEvents.enabled && isSlotFree) {
+      EventMessage.from(activationResult, s"invoker${instance.instance}", userId) match {
+        case Success(msg) => UserEvents.send(producer, msg)
+        case Failure(t)   => logging.error(this, s"activation event was not sent: $t")
+      }
+    }
 
     send(Right(if (blockingInvoke) activationResult else activationResult.withoutLogsOrResult)).recoverWith {
       case t if t.getCause.isInstanceOf[RecordTooLargeException] =>
@@ -160,9 +153,9 @@ class InvokerReactive(
   }
 
   /** Stores an activation in the database. */
-  private val store = (tid: TransactionId, activation: WhiskActivation) => {
+  private val store = (tid: TransactionId, activation: WhiskActivation, context: UserContext) => {
     implicit val transid: TransactionId = tid
-    activationStore.store(activation)(tid, notifier = None)
+    activationStore.store(activation, context)(tid, notifier = None)
   }
 
   /** Creates a ContainerProxy Actor when being called. */
@@ -236,10 +229,11 @@ class InvokerReactive(
                     ActivationResponse.whiskError(Messages.actionFetchErrorWhileInvoking)
                 }
 
+                val context = UserContext(msg.user)
                 val activation = generateFallbackActivation(msg, response)
                 activationFeed ! MessageFeed.Processed
-                ack(msg.transid, activation, msg.blocking, msg.rootControllerIndex, msg.user.namespace.uuid)
-                store(msg.transid, activation)
+                ack(msg.transid, activation, msg.blocking, msg.rootControllerIndex, msg.user.namespace.uuid, true)
+                store(msg.transid, activation, context)
                 Future.successful(())
             }
         } else {
@@ -248,7 +242,7 @@ class InvokerReactive(
           activationFeed ! MessageFeed.Processed
           val activation =
             generateFallbackActivation(msg, ActivationResponse.applicationError(Messages.namespacesBlacklisted))
-          ack(msg.transid, activation, false, msg.rootControllerIndex, msg.user.namespace.uuid)
+          ack(msg.transid, activation, false, msg.rootControllerIndex, msg.user.namespace.uuid, true)
           logging.warn(this, s"namespace ${msg.user.namespace.name} was blocked in invoker.")
           Future.successful(())
         }

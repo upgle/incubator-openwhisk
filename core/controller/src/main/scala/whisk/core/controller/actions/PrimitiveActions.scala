@@ -22,21 +22,23 @@ import java.time.{Clock, Instant}
 import akka.actor.ActorSystem
 import akka.event.Logging.InfoLevel
 import spray.json._
-import whisk.common.{Logging, LoggingMarkers, TransactionId}
 import whisk.common.tracing.WhiskTracerProvider
-import whisk.core.connector.ActivationMessage
+import whisk.common.{Logging, LoggingMarkers, TransactionId, UserEvents}
+import whisk.core.connector.{ActivationMessage, EventMessage, MessagingProvider}
 import whisk.core.controller.WhiskServices
-import whisk.core.database.NoDocumentException
+import whisk.core.database.{ActivationStore, NoDocumentException, UserContext}
 import whisk.core.entitlement.{Resource, _}
+import whisk.core.entity.ActivationResponse.ERROR_FIELD
 import whisk.core.entity._
 import whisk.core.entity.size.SizeInt
 import whisk.core.entity.types.EntityStore
 import whisk.http.Messages._
+import whisk.spi.SpiLoader
 import whisk.utils.ExecutionContextFactory.FutureExtensions
 
 import scala.collection.mutable.Buffer
-import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.language.postfixOps
 import scala.util.{Failure, Success}
 
@@ -63,6 +65,10 @@ protected[actions] trait PrimitiveActions {
 
   /** Database service to get activations. */
   protected val activationStore: ActivationStore
+
+  /** Message producer. This is needed to write user-metrics. */
+  private val messagingProvider = SpiLoader.get[MessagingProvider]
+  private val producer = messagingProvider.getProducer(services.whiskConfig)
 
   /** A method that knows how to invoke a sequence of actions. */
   protected[actions] def invokeSequence(
@@ -172,23 +178,24 @@ protected[actions] trait PrimitiveActions {
 
     val postedFuture = loadBalancer.publish(action, message)
 
-    postedFuture.flatMap { activeAckResponse =>
-      // successfully posted activation request to the message bus
-      transid.finished(this, startLoadbalancer)
-
+    postedFuture andThen {
+      case Success(_) => transid.finished(this, startLoadbalancer)
+      case Failure(e) => transid.failed(this, startLoadbalancer, e.getMessage)
+    } flatMap { activeAckResponse =>
       // is caller waiting for the result of the activation?
       waitForResponse
         .map { timeout =>
           // yes, then wait for the activation response from the message bus
           // (known as the active response or active ack)
           waitForActivationResponse(user, message.activationId, timeout, activeAckResponse)
-            .andThen { case _ => transid.finished(this, startActivation) }
         }
         .getOrElse {
           // no, return the activation id
-          transid.finished(this, startActivation)
           Future.successful(Left(message.activationId))
         }
+    } andThen {
+      case Success(_) => transid.finished(this, startActivation)
+      case Failure(e) => transid.failed(this, startActivation, e.getMessage)
     }
   }
 
@@ -354,10 +361,17 @@ protected[actions] trait PrimitiveActions {
                   tryInvokeNext(user, fqn, params, session)
 
                 case Some(_) => // composition is too long
-                  Future.successful(ActivationResponse.applicationError(compositionIsTooLong))
+                  invokeConductor(
+                    user,
+                    payload = Some(JsObject(ERROR_FIELD -> JsString(compositionIsTooLong))),
+                    session = session)
 
                 case None => // parsing failure
-                  Future.successful(ActivationResponse.applicationError(compositionComponentInvalid(next)))
+                  invokeConductor(
+                    user,
+                    payload = Some(JsObject(ERROR_FIELD -> JsString(compositionComponentInvalid(next)))),
+                    session = session)
+
               }
           }
       }
@@ -388,16 +402,22 @@ protected[actions] trait PrimitiveActions {
               // successful resolution
               invokeComponent(user, action = next, payload = params, session)
           }
-          .recover {
+          .recoverWith {
             case _ =>
               // resolution failure
-              ActivationResponse.applicationError(compositionComponentNotFound(fqn.asString))
+              invokeConductor(
+                user,
+                payload = Some(JsObject(ERROR_FIELD -> JsString(compositionComponentNotFound(fqn.asString)))),
+                session = session)
           }
       }
-      .recover {
+      .recoverWith {
         case _ =>
           // failed entitlement check
-          ActivationResponse.applicationError(compositionComponentNotAccessible(fqn.asString))
+          invokeConductor(
+            user,
+            payload = Some(JsObject(ERROR_FIELD -> JsString(compositionComponentNotAccessible(fqn.asString)))),
+            session = session)
       }
   }
 
@@ -503,6 +523,8 @@ protected[actions] trait PrimitiveActions {
   private def completeActivation(user: Identity, session: Session, response: ActivationResponse)(
     implicit transid: TransactionId): WhiskActivation = {
 
+    val context = UserContext(user)
+
     // compute max memory
     val sequenceLimits = Parameters(
       WhiskActivation.limitsAnnotation,
@@ -536,7 +558,14 @@ protected[actions] trait PrimitiveActions {
         sequenceLimits,
       duration = Some(session.duration))
 
-    activationStore.store(activation)(transid, notifier = None)
+    if (UserEvents.enabled) {
+      EventMessage.from(activation, s"controller${activeAckTopicIndex.asString}", user.namespace.uuid) match {
+        case Success(msg) => UserEvents.send(producer, msg)
+        case Failure(t)   => logging.warn(this, s"activation event was not sent: $t")
+      }
+    }
+
+    activationStore.store(activation, context)(transid, notifier = None)
 
     activation
   }
@@ -555,8 +584,8 @@ protected[actions] trait PrimitiveActions {
                                         totalWaitTime: FiniteDuration,
                                         activeAckResponse: Future[Either[ActivationId, WhiskActivation]])(
     implicit transid: TransactionId): Future[Either[ActivationId, WhiskActivation]] = {
+    val context = UserContext(user)
     val result = Promise[Either[ActivationId, WhiskActivation]]
-
     val docid = new DocId(WhiskEntity.qualifiedName(user.namespace.name.toPath, activationId))
     logging.debug(this, s"action activation will block for result upto $totalWaitTime")
 
@@ -564,11 +593,11 @@ protected[actions] trait PrimitiveActions {
     //    in case of an incomplete active-ack (record too large for example).
     activeAckResponse.foreach {
       case Right(activation) => result.trySuccess(Right(activation))
-      case _                 => pollActivation(docid, result, i => 1.seconds + (2.seconds * i), maxRetries = 4)
+      case _                 => pollActivation(docid, context, result, i => 1.seconds + (2.seconds * i), maxRetries = 4)
     }
 
     // 2. Poll the database slowly in case the active-ack never arrives
-    pollActivation(docid, result, _ => 15.seconds)
+    pollActivation(docid, context, result, _ => 15.seconds)
 
     // 3. Timeout forces a fallback to activationId
     val timeout = actorSystem.scheduler.scheduleOnce(totalWaitTime)(result.trySuccess(Left(activationId)))
@@ -588,15 +617,22 @@ protected[actions] trait PrimitiveActions {
    * @param result promise to resolve on result. Is also used to abort polling once completed.
    */
   private def pollActivation(docid: DocId,
+                             context: UserContext,
                              result: Promise[Either[ActivationId, WhiskActivation]],
                              wait: Int => FiniteDuration,
                              retries: Int = 0,
                              maxRetries: Int = Int.MaxValue)(implicit transid: TransactionId): Unit = {
     if (!result.isCompleted && retries < maxRetries) {
       val schedule = actorSystem.scheduler.scheduleOnce(wait(retries)) {
-        activationStore.get(ActivationId(docid.asString)).onComplete {
-          case Success(activation)             => result.trySuccess(Right(activation))
-          case Failure(_: NoDocumentException) => pollActivation(docid, result, wait, retries + 1, maxRetries)
+        activationStore.get(ActivationId(docid.asString), context).onComplete {
+          case Success(activation) =>
+            transid.mark(
+              this,
+              LoggingMarkers.CONTROLLER_ACTIVATION_BLOCKING_DATABASE_RETRIEVAL,
+              s"retrieved activation for blocking invocation via DB polling",
+              logLevel = InfoLevel)
+            result.trySuccess(Right(activation.withoutLogs))
+          case Failure(_: NoDocumentException) => pollActivation(docid, context, result, wait, retries + 1, maxRetries)
           case Failure(t: Throwable)           => result.tryFailure(t)
         }
       }

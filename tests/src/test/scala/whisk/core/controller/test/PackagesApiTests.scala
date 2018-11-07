@@ -101,7 +101,7 @@ class PackagesApiTests extends ControllerTestCommon with WhiskPackagesApi {
       checkCount(path, 0, auser)
       Get(path) ~> Route.seal(routes(auser)) ~> check {
         val response = responseAs[List[JsObject]]
-        response should be(List()) // cannot list packages that are private in another namespace
+        response should be(List.empty) // cannot list packages that are private in another namespace
       }
     }
   }
@@ -794,6 +794,15 @@ class PackagesApiTests extends ControllerTestCommon with WhiskPackagesApi {
     put(entityStore, provider)
     Get(s"$collectionPath/${provider.name}/bar") ~> Route.seal(routes(creds)) ~> check {
       status should be(NotFound)
+    }
+  }
+
+  it should "return empty list for invalid namespace" in {
+    implicit val tid = transid()
+    val path = s"/whisk.systsdf/${collection.path}"
+    Get(path) ~> Route.seal(routes(creds)) ~> check {
+      status should be(OK)
+      responseAs[List[JsObject]] should be(List.empty)
     }
   }
 

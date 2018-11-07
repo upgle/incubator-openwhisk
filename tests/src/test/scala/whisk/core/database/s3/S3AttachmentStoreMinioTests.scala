@@ -15,38 +15,17 @@
  * limitations under the License.
  */
 
-package whisk.common
+package whisk.core.database.s3
 
-import java.util.Date
-import java.text.SimpleDateFormat
-import java.lang.System
+import org.junit.runner.RunWith
+import org.scalatest.junit.JUnitRunner
+import whisk.core.entity.WhiskEntity
 
-/**
- * Utility methods for creating formatted date strings.
- *
- */
-object DateUtil {
+@RunWith(classOf[JUnitRunner])
+class S3AttachmentStoreMinioTests extends S3AttachmentStoreBehaviorBase with S3Minio {
+  override lazy val store = makeS3Store[WhiskEntity]
 
-  /**
-   * Returns the current time as a string in yyyy-MM-dd'T'HH:mm:ss.SSSZ format.
-   */
-  def getTimeString(): String = {
-    val now = new Date(System.currentTimeMillis())
-    timeFormat.synchronized {
-      timeFormat.format(now)
-    }
-  }
+  override def storeType: String = "S3Minio"
 
-  /**
-   * Takes a string in a format given by getTimeString and returns time in epoch millis.
-   */
-  def parseToMilli(dateStr: String): Long = {
-    val date = timeFormat.synchronized {
-      timeFormat.parse(dateStr, new java.text.ParsePosition(0))
-    }
-    date.getTime()
-  }
-
-  private val timeFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
-
+  override def garbageCollectAttachments: Boolean = false
 }

@@ -44,6 +44,7 @@ import whisk.core.containerpool.{ContainerAddress, ContainerId}
 import whisk.core.containerpool.kubernetes._
 import whisk.core.entity.ByteSize
 import whisk.core.entity.size._
+import whisk.core.containerpool.Container.ACTIVATION_LOG_SENTINEL
 
 import scala.collection.mutable
 import scala.collection.immutable
@@ -76,13 +77,9 @@ class KubernetesClientTests
   val id = ContainerId("55db56ee082239428b27d3728b4dd324c09068458aad9825727d5bfc1bba6d52")
   val container = kubernetesContainer(id)
 
-  val kubectlCommand = "kubectl"
-
   /** Returns a KubernetesClient with a mocked result for 'executeProcess' */
   def kubernetesClient(fixture: => Future[String]) = {
     new KubernetesClient()(global) {
-      override def findKubectlCmd() = kubectlCommand
-
       override def executeProcess(args: Seq[String], timeout: Duration)(implicit ec: ExecutionContext,
                                                                         as: ActorSystem) =
         fixture
@@ -92,17 +89,17 @@ class KubernetesClientTests
   def kubernetesContainer(id: ContainerId) =
     new KubernetesContainer(id, ContainerAddress("ip"), "ip", "docker://" + id.asString)(kubernetesClient {
       Future.successful("")
-    }, global, logging)
+    }, actorSystem, global, logging)
 
   behavior of "KubernetesClient"
 
-  val firstLog = """2018-02-06T00:00:18.419889342Z first activation
-                   |2018-02-06T00:00:18.419929471Z XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
-                   |2018-02-06T00:00:18.419988733Z XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
+  val firstLog = s"""2018-02-06T00:00:18.419889342Z first activation
+                   |2018-02-06T00:00:18.419929471Z $ACTIVATION_LOG_SENTINEL
+                   |2018-02-06T00:00:18.419988733Z $ACTIVATION_LOG_SENTINEL
                    |""".stripMargin
-  val secondLog = """2018-02-06T00:09:35.38267193Z second activation
-                    |2018-02-06T00:09:35.382990278Z XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
-                    |2018-02-06T00:09:35.383116503Z XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
+  val secondLog = s"""2018-02-06T00:09:35.38267193Z second activation
+                    |2018-02-06T00:09:35.382990278Z $ACTIVATION_LOG_SENTINEL
+                    |2018-02-06T00:09:35.383116503Z $ACTIVATION_LOG_SENTINEL
                     |""".stripMargin
 
   def firstSource(lastTimestamp: Option[Instant] = None): Source[TypedLogLine, Any] =
@@ -145,7 +142,7 @@ class KubernetesClientTests
     val logs = awaitLogs(client.logs(container, None))
     logs should have size 3
     logs(0) shouldBe TypedLogLine("2018-02-06T00:00:18.419889342Z", "stdout", "first activation")
-    logs(2) shouldBe TypedLogLine("2018-02-06T00:00:18.419988733Z", "stdout", "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX")
+    logs(2) shouldBe TypedLogLine("2018-02-06T00:00:18.419988733Z", "stdout", ACTIVATION_LOG_SENTINEL)
   }
 
   it should "return all logs after the one matching sinceTime" in {
@@ -160,7 +157,7 @@ class KubernetesClientTests
     val logs = awaitLogs(client.logs(container, testDate))
     logs should have size 3
     logs(0) shouldBe TypedLogLine("2018-02-06T00:09:35.38267193Z", "stdout", "second activation")
-    logs(2) shouldBe TypedLogLine("2018-02-06T00:09:35.383116503Z", "stdout", "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX")
+    logs(2) shouldBe TypedLogLine("2018-02-06T00:09:35.383116503Z", "stdout", ACTIVATION_LOG_SENTINEL)
   }
 
   it should "return all logs if none match sinceTime" in {
@@ -174,7 +171,7 @@ class KubernetesClientTests
     val logs = awaitLogs(client.logs(container, testDate))
     logs should have size 3
     logs(0) shouldBe TypedLogLine("2018-02-06T00:09:35.38267193Z", "stdout", "second activation")
-    logs(2) shouldBe TypedLogLine("2018-02-06T00:09:35.383116503Z", "stdout", "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX")
+    logs(2) shouldBe TypedLogLine("2018-02-06T00:09:35.383116503Z", "stdout", ACTIVATION_LOG_SENTINEL)
   }
 
 }
@@ -188,7 +185,7 @@ object KubernetesClientTests {
   implicit def strToInstant(str: String): Instant =
     strToDate(str).get
 
-  class TestKubernetesClient extends KubernetesApi with StreamLogging {
+  class TestKubernetesClient(implicit as: ActorSystem) extends KubernetesApi with StreamLogging {
     var runs = mutable.Buffer.empty[(String, String, Map[String, String], Map[String, String])]
     var rms = mutable.Buffer.empty[ContainerId]
     var rmByLabels = mutable.Buffer.empty[(String, String)]
@@ -238,7 +235,9 @@ object KubernetesClientTests {
     }
   }
 
-  class TestKubernetesClientWithInvokerAgent extends TestKubernetesClient with KubernetesApiWithInvokerAgent {
+  class TestKubernetesClientWithInvokerAgent(implicit as: ActorSystem)
+      extends TestKubernetesClient
+      with KubernetesApiWithInvokerAgent {
     var agentCommands = mutable.Buffer.empty[(ContainerId, String, Option[Map[String, JsValue]])]
     var forwardLogs = mutable.Buffer.empty[(ContainerId, Long)]
 

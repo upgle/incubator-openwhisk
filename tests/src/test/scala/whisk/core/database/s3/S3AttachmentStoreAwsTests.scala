@@ -15,21 +15,15 @@
  * limitations under the License.
  */
 
-package whisk.common
+package whisk.core.database.s3
 
-import java.lang.System
-import scala.concurrent.duration._
+import org.junit.runner.RunWith
+import org.scalatest.junit.JUnitRunner
+import whisk.core.entity.WhiskEntity
 
-/**
- * Utility methods related to timing code blocks.
- *
- */
-object TimingUtil {
+@RunWith(classOf[JUnitRunner])
+class S3AttachmentStoreAwsTests extends S3AttachmentStoreBehaviorBase with S3Aws {
+  override lazy val store = makeS3Store[WhiskEntity]
 
-  def time[T](blk: => T): (Duration, T) = {
-    val start = System.currentTimeMillis
-    val res = blk
-    ((System.currentTimeMillis - start).millis, res)
-  }
-
+  override def storeType: String = "S3"
 }

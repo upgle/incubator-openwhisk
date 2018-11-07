@@ -72,11 +72,11 @@ object MesosTask {
              userProvidedImage: Boolean = false,
              memory: ByteSize = 256.MB,
              cpuShares: Int = 0,
-             environment: Map[String, String] = Map(),
+             environment: Map[String, String] = Map.empty,
              network: String = "bridge",
-             dnsServers: Seq[String] = Seq(),
+             dnsServers: Seq[String] = Seq.empty,
              name: Option[String] = None,
-             parameters: Map[String, Set[String]] = Map(),
+             parameters: Map[String, Set[String]] = Map.empty,
              constraints: Seq[Constraint] = Seq.empty)(implicit ec: ExecutionContext,
                                                        log: Logging,
                                                        as: ActorSystem): Future[Container] = {
@@ -94,7 +94,7 @@ object MesosTask {
       case "host"   => Host
       case _        => User(network)
     }
-    val dnsOrEmpty = if (dnsServers.nonEmpty) Map("dns" -> dnsServers.toSet) else Map()
+    val dnsOrEmpty = if (dnsServers.nonEmpty) Map("dns" -> dnsServers.toSet) else Map.empty
 
     val task = new TaskDef(
       taskId,
@@ -119,7 +119,7 @@ object MesosTask {
       log.info(this, s"launched task with state ${taskDetails.taskStatus.getState} at ${taskHost}:${taskPort}")
       val containerIp = new ContainerAddress(taskHost, taskPort)
       val containerId = new ContainerId(taskId);
-      new MesosTask(containerId, containerIp, ec, log, taskId, mesosClientActor, mesosConfig)
+      new MesosTask(containerId, containerIp, ec, log, as, taskId, mesosClientActor, mesosConfig)
     })
 
   }
@@ -134,6 +134,7 @@ class MesosTask(override protected val id: ContainerId,
                 override protected val addr: ContainerAddress,
                 override protected val ec: ExecutionContext,
                 override protected val logging: Logging,
+                override protected val as: ActorSystem,
                 taskId: String,
                 mesosClientActor: ActorRef,
                 mesosConfig: MesosConfig)
@@ -141,8 +142,8 @@ class MesosTask(override protected val id: ContainerId,
 
   /** Stops the container from consuming CPU cycles. */
   override def suspend()(implicit transid: TransactionId): Future[Unit] = {
-    // suspend not supported
-    Future.successful(Unit)
+    super.suspend()
+    // suspend not supported (just return result from super)
   }
 
   /** Dual of halt. */

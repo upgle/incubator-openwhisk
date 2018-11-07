@@ -182,8 +182,8 @@ case class LogMarkerToken(component: String,
                           subAction: Option[String] = None,
                           tags: Map[String, String] = Map.empty) {
 
-  override def toString = component + "_" + action + "_" + state
-  def toStringWithSubAction =
+  override val toString = component + "_" + action + "_" + state
+  val toStringWithSubAction =
     subAction.map(sa => component + "_" + action + "." + sa + "_" + state).getOrElse(toString)
 
   def asFinish = copy(state = LoggingMarkers.finish)
@@ -212,14 +212,14 @@ object MetricEmitter {
 
   val metrics = Kamon.metrics
 
-  def emitCounterMetric(token: LogMarkerToken): Unit = {
+  def emitCounterMetric(token: LogMarkerToken, times: Long = 1): Unit = {
     if (TransactionId.metricsKamon) {
       if (TransactionId.metricsKamonTags) {
         metrics
           .counter(token.toString, token.tags)
-          .increment(1)
+          .increment(times)
       } else {
-        metrics.counter(token.toStringWithSubAction).increment(1)
+        metrics.counter(token.toStringWithSubAction).increment(times)
       }
     }
   }
@@ -243,6 +243,7 @@ object LoggingMarkers {
   val finish = "finish"
   val error = "error"
   val count = "count"
+  val timeout = "timeout"
 
   private val controller = "controller"
   private val invoker = "invoker"
@@ -250,6 +251,7 @@ object LoggingMarkers {
   private val activation = "activation"
   private val kafka = "kafka"
   private val loadbalancer = "loadbalancer"
+  private val containerClient = "containerClient"
 
   /*
    * Controller related markers
@@ -259,6 +261,8 @@ object LoggingMarkers {
   // Time of the activation in controller until it is delivered to Kafka
   val CONTROLLER_ACTIVATION = LogMarkerToken(controller, activation, start)
   val CONTROLLER_ACTIVATION_BLOCKING = LogMarkerToken(controller, "blockingActivation", start)
+  val CONTROLLER_ACTIVATION_BLOCKING_DATABASE_RETRIEVAL =
+    LogMarkerToken(controller, "blockingActivationDatabaseRetrieval", count)
 
   // Time that is needed load balance the activation
   val CONTROLLER_LOADBALANCER = LogMarkerToken(controller, loadbalancer, start)
@@ -272,8 +276,8 @@ object LoggingMarkers {
   def INVOKER_STARTUP(i: Int) = LogMarkerToken(invoker, s"startup$i", count)
 
   // Check invoker healthy state from loadbalancer
-  val LOADBALANCER_INVOKER_OFFLINE = LogMarkerToken(loadbalancer, "invokerOffline", count)
-  val LOADBALANCER_INVOKER_UNHEALTHY = LogMarkerToken(loadbalancer, "invokerUnhealthy", count)
+  def LOADBALANCER_INVOKER_STATUS_CHANGE(state: String) =
+    LogMarkerToken(loadbalancer, "invokerState", count, Some(state))
   val LOADBALANCER_ACTIVATION_START = LogMarkerToken(loadbalancer, "activations", count)
 
   def LOADBALANCER_ACTIVATIONS_INFLIGHT(controllerInstance: ControllerInstanceId) =
@@ -293,10 +297,14 @@ object LoggingMarkers {
   // Time in invoker
   val INVOKER_ACTIVATION = LogMarkerToken(invoker, activation, start)
   def INVOKER_DOCKER_CMD(cmd: String) = LogMarkerToken(invoker, "docker", start, Some(cmd), Map("cmd" -> cmd))
+  def INVOKER_DOCKER_CMD_TIMEOUT(cmd: String) =
+    LogMarkerToken(invoker, "docker", timeout, Some(cmd), Map("cmd" -> cmd))
   def INVOKER_RUNC_CMD(cmd: String) = LogMarkerToken(invoker, "runc", start, Some(cmd), Map("cmd" -> cmd))
   def INVOKER_KUBECTL_CMD(cmd: String) = LogMarkerToken(invoker, "kubectl", start, Some(cmd), Map("cmd" -> cmd))
   def INVOKER_CONTAINER_START(containerState: String) =
     LogMarkerToken(invoker, "containerStart", count, Some(containerState), Map("containerState" -> containerState))
+  val CONTAINER_CLIENT_RETRIES =
+    LogMarkerToken(containerClient, "retries", count)
 
   // Kafka related markers
   def KAFKA_QUEUE(topic: String) = LogMarkerToken(kafka, topic, count)

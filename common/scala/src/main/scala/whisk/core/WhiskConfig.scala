@@ -54,12 +54,9 @@ class WhiskConfig(requiredProperties: Map[String, String],
   val dockerEndpoint = this(WhiskConfig.dockerEndpoint)
   val dockerPort = this(WhiskConfig.dockerPort)
 
-  val invokerName = this(WhiskConfig.invokerName)
-
   val wskApiHost = this(WhiskConfig.wskApiProtocol) + "://" + this(WhiskConfig.wskApiHostname) + ":" + this(
     WhiskConfig.wskApiPort)
   val controllerBlackboxFraction = this.getAsDouble(WhiskConfig.controllerBlackboxFraction, 0.10)
-  val loadbalancerInvokerBusyThreshold = this.getAsInt(WhiskConfig.loadbalancerInvokerBusyThreshold, 16)
   val controllerInstances = this(WhiskConfig.controllerInstances)
 
   val edgeHost = this(WhiskConfig.edgeHostName) + ":" + this(WhiskConfig.edgeHostApiPort)
@@ -78,7 +75,6 @@ class WhiskConfig(requiredProperties: Map[String, String],
   val actionInvokePerMinuteLimit = this(WhiskConfig.actionInvokePerMinuteLimit)
   val actionInvokeConcurrentLimit = this(WhiskConfig.actionInvokeConcurrentLimit)
   val triggerFirePerMinuteLimit = this(WhiskConfig.triggerFirePerMinuteLimit)
-  val actionInvokeSystemOverloadLimit = this(WhiskConfig.actionInvokeSystemOverloadLimit)
   val actionSequenceLimit = this(WhiskConfig.actionSequenceMaxLimit)
   val controllerSeedNodes = this(WhiskConfig.controllerSeedNodes)
 }
@@ -155,8 +151,6 @@ object WhiskConfig {
   // passed to the user container)
   val edgeHostName = "edge.host"
 
-  val invokerName = "invoker.name"
-
   val wskApiProtocol = "whisk.api.host.proto"
   val wskApiPort = "whisk.api.host.port"
   val wskApiHostname = "whisk.api.host.name"
@@ -167,8 +161,6 @@ object WhiskConfig {
   val controllerBlackboxFraction = "controller.blackboxFraction"
   val controllerInstances = "controller.instances"
   val dbInstances = "db.instances"
-
-  val loadbalancerInvokerBusyThreshold = "loadbalancer.invokerBusyThreshold"
 
   val kafkaHostList = "kafka.hosts"
   val zookeeperHostList = "zookeeper.hosts"
@@ -189,7 +181,6 @@ object WhiskConfig {
   val actionSequenceMaxLimit = "limits.actions.sequence.maxLength"
   val actionInvokePerMinuteLimit = "limits.actions.invokes.perMinute"
   val actionInvokeConcurrentLimit = "limits.actions.invokes.concurrent"
-  val actionInvokeSystemOverloadLimit = "limits.actions.invokes.concurrentInSystem"
   val triggerFirePerMinuteLimit = "limits.triggers.fires.perMinute"
   val controllerSeedNodes = "akka.cluster.seed.nodes"
 }
@@ -211,16 +202,16 @@ object ConfigKeys {
   val timeLimit = "whisk.time-limit"
   val logLimit = "whisk.log-limit"
   val activation = "whisk.activation"
-  val activationPayload = s"$activation.payload"
   val userEvents = "whisk.user-events"
 
   val runtimes = "whisk.runtimes"
+  val runtimesWhitelists = s"$runtimes.whitelists"
 
   val db = "whisk.db"
 
   val docker = "whisk.docker"
-  val dockerTimeouts = s"$docker.timeouts"
-  val dockerContainerFactory = s"${docker}.container-factory"
+  val dockerClient = s"$docker.client"
+  val dockerContainerFactory = s"$docker.container-factory"
   val runc = "whisk.runc"
   val runcTimeouts = s"$runc.timeouts"
 
@@ -244,5 +235,7 @@ object ConfigKeys {
 
   val containerProxy = "whisk.container-proxy"
   val containerProxyTimeouts = s"$containerProxy.timeouts"
+
+  val s3 = "whisk.s3"
 
 }

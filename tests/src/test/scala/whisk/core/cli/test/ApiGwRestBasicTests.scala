@@ -97,7 +97,7 @@ abstract class ApiGwRestBasicTests extends BaseApiGwTests {
   }
 
   def verifyApiGet(rr: RunResult): Unit = {
-    rr.stdout should include regex (s""""operationId":\\s+"getPathWithSub_pathsInIt"""")
+    rr.stdout should include regex (s""""operationId":\\s*"getPathWithSub_pathsInIt"""")
   }
 
   def verifyApiFullList(rr: RunResult,
@@ -521,6 +521,8 @@ abstract class ApiGwRestBasicTests extends BaseApiGwTests {
     val testName = "CLI_APIGWTEST7"
     val testbasepath = "/" + testName + "_bp"
     val testrelpath = "/path"
+    val testrelpath1 = "/pathSecure1"
+    val testrelpath2 = "/pathSecure2"
     val testurlop = "get"
     val testapiname = testName + " API Name"
     val actionName = testName + "_action"
@@ -530,7 +532,8 @@ abstract class ApiGwRestBasicTests extends BaseApiGwTests {
       verifyApiCreated(rr)
       rr = apiList(basepathOrApiName = Some(testbasepath), relpath = Some(testrelpath), operation = Some(testurlop))
       verifyApiFullList(rr, "", actionName, testurlop, testbasepath, testrelpath, testapiname)
-
+      verifyApiFullList(rr, "", actionName, testurlop, testbasepath, testrelpath1, testapiname)
+      verifyApiFullList(rr, "", actionName, testurlop, testbasepath, testrelpath2, testapiname)
     } finally {
       apiDelete(basepathOrApiName = testbasepath, expectedExitCode = DONTCARE_EXIT)
     }
@@ -897,6 +900,39 @@ abstract class ApiGwRestBasicTests extends BaseApiGwTests {
     } finally {
       wsk.action.delete(name = actionName, expectedExitCode = DONTCARE_EXIT)
       apiDelete(basepathOrApiName = testbasepath, expectedExitCode = DONTCARE_EXIT)
+    }
+  }
+
+  it should "verify get API name that uses custom package" in {
+    val testName = "CLI_APIGWTEST25"
+    val testbasepath = "/" + testName + "_bp"
+    val testrelpath = "/path"
+    val testnewrelpath = "/path_new"
+    val testurlop = "get"
+    val testapiname = testName + " API Name"
+    val packageName = withTimestamp("pkg")
+    val actionName = packageName + "/" + testName + "_action"
+    try {
+      wsk.pkg.create(packageName).stdout should include regex (s""""name":\\s*"$packageName"""")
+
+      // Create the action for the API.  It must be a "web-action" action.
+      val file = TestUtils.getTestActionFilename(s"echo.js")
+      wsk.action.create(name = actionName, artifact = Some(file), expectedExitCode = 200, web = Some("true"))
+
+      var rr = apiCreate(
+        basepath = Some(testbasepath),
+        relpath = Some(testrelpath),
+        operation = Some(testurlop),
+        action = Some(actionName),
+        apiname = Some(testapiname))
+      verifyApiCreated(rr)
+
+      rr = apiGet(basepathOrApiName = Some(testapiname))
+      verifyApiList(rr, clinamespace, testName + "_action", testurlop, testbasepath, testrelpath, testapiname)
+    } finally {
+      wsk.action.delete(name = actionName, expectedExitCode = DONTCARE_EXIT)
+      apiDelete(basepathOrApiName = testbasepath, expectedExitCode = DONTCARE_EXIT)
+      wsk.pkg.delete(packageName).stdout should include regex (s""""name":\\s*"$packageName"""")
     }
   }
 }
