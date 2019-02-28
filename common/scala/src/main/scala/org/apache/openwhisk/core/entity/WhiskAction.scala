@@ -19,6 +19,7 @@ package org.apache.openwhisk.core.entity
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
 import java.nio.charset.StandardCharsets.UTF_8
+import java.time.Instant
 import java.util.Base64
 
 import akka.http.scaladsl.model.ContentTypes
@@ -81,6 +82,20 @@ abstract class WhiskActionLike(override val name: EntityName) extends WhiskEntit
   def parameters: Parameters
   def limits: ActionLimits
 
+
+  protected[entity] implicit val instantSerdes = new RootJsonFormat[Instant] {
+    def write(t: Instant) = t.toEpochMilli.toJson
+
+    def read(value: JsValue) =
+      Try {
+        value match {
+          case JsString(t) => Instant.parse(t)
+          case JsNumber(i) => Instant.ofEpochMilli(i.bigDecimal.longValue)
+          case _           => deserializationError("timestamp malformed")
+        }
+      } getOrElse deserializationError("timestamp malformed")
+  }
+
   /** @return true iff action has appropriate annotation. */
   def hasFinalParamsAnnotation = {
     annotations.getAs[Boolean](WhiskAction.finalParamsAnnotationName) getOrElse false
@@ -101,6 +116,7 @@ abstract class WhiskActionLike(override val name: EntityName) extends WhiskEntit
       "limits" -> limits.toJson,
       "version" -> version.toJson,
       "publish" -> publish.toJson,
+      "updated" -> updated.toJson,
       "annotations" -> annotations.toJson)
 }
 
@@ -517,16 +533,34 @@ object WhiskActionMetaData
 
   override val collectionName = "actions"
 
-  override implicit val serdes = jsonFormat(
-    WhiskActionMetaData.apply,
-    "namespace",
-    "name",
-    "exec",
-    "parameters",
-    "limits",
-    "version",
-    "publish",
-    "annotations")
+  protected[entity] implicit val instantSerdes = new RootJsonFormat[Instant] {
+    def write(t: Instant) = t.toEpochMilli.toJson
+
+    def read(value: JsValue) =
+      Try {
+        value match {
+          case JsString(t) => Instant.parse(t)
+          case JsNumber(i) => Instant.ofEpochMilli(i.bigDecimal.longValue)
+          case _           => deserializationError("timestamp malformed")
+        }
+      } getOrElse deserializationError("timestamp malformed")
+  }
+
+  override implicit val serdes = new RootJsonFormat[WhiskActionMetaData] {
+    private val format = jsonFormat(WhiskActionMetaData.apply,
+      "namespace",
+      "name",
+      "exec",
+      "parameters",
+      "limits",
+      "version",
+      "publish",
+      "annotations")
+
+    def write(result: WhiskActionMetaData) = result.toJson
+    def read(value: JsValue) = format.read(value)
+  }
+
 
   override val cacheEnabled = true
 
